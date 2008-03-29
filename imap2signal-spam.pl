@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# @author Bruno Ethvignot <bruno@tlk.biz>
+# @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
 # @date 2008-03-29
 # http://code.google.com/p/imap2signal-spam/source/checkout
