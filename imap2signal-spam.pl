@@ -2,6 +2,7 @@
 # @author Bruno Ethvignot <bruno@tlk.biz>
 # @created 2008-03-27
 # @date 2008-03-29
+# http://code.google.com/p/imap2signal-spam/source/checkout
 #
 # copyright (c) 2008 TLK Games all rights reserved
 # $Id$
