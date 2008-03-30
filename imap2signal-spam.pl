@@ -1,8 +1,8 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-03-29
-# http://code.google.com/p/imap2signal-spam/source/checkout
+# @date 2008-03-30
+# http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
 # $Id$
@@ -43,6 +43,7 @@ my $configFileName = 'imap2signal-spam.conf';
 my $isVerbose      = 0;
 my $isDebug        = 0;
 my $isTest         = 0;
+my $ignoreDelay    = 0;
 my $boxIdFilter;
 my $client;
 my $user_agent;
@@ -162,7 +163,10 @@ sub post {
         my $message = $response->status_line();
         die $message;
     }
-    print $response->content;
+    print STDOUT "post() the email was submitted with the"
+        . " '$account_ref->{'username'}' account\n"
+        if $isVerbose;
+    #print $response->content;
 
 }
 
@@ -223,31 +227,60 @@ sub init {
 
 ## @method void readConfig()
 sub readConfig {
-    foreach my $pathname ( '.', '~./.imap2signal-spam', '/etc' ) {
+    my $confFound = 0;
+    foreach my $pathname ( '.', $ENV{'HOME'} . '/.imap2signal-spam', '/etc' ) {
         my $filename = $pathname . '/' . $configFileName;
         next if !-e $filename;
+        $confFound = 1;
         my %config = Config::General->new($filename)->getall();
 
-        #print Dumper ( \%config );
-
-        die "(!) readConfig(): 'user-agent' entry not found! "
-            if !exists $config{'user-agent'};
-        $agent_ref = $config{'user-agent'};
-        die "(!) readConfig(): agent string  not found! "
-            if !exists $agent_ref->{'agent'};
-        die "(!) readConfig(): agent timeout not found! "
-            if !exists $agent_ref->{'timeout'};
-        die "(!) readConfig(): bad format for agent timeout ! "
-            if $agent_ref->{'timeout'} !~ m{^\d+$};
+        readAgentSection($config{'user-agent'}) 
+            if exists $config{'user-agent'};
 
         # read signal spam account(s)
-        die "(!) readConfig(): 'signal-spam' entry not found! "
-            if !exists $config{'signal-spam'};
-        my $signal_ref = $config{'signal-spam'};
-        die "(!) readConfig(): signal-spam URL not found! "
+        readSignalSection($config{'signal-spam'})  
+            if exists $config{'signal-spam'};
+
+        # read IMAP box(es)
+        readMailboxSections($config{'mailbox'})  
+            if exists $config{'mailbox'};
+        
+       $confFound = 1;
+    }
+
+    die "No configuration file has been found!"
+         if !$confFound;
+    die "(!) readConfig(): 'user-agent' section not found! "
+        if !defined $agent_ref; 
+    die "(!) readConfig(): 'signal-spam' entry not found! "
+        if scalar(keys %accounts) == 0;
+    die "(!) readConfig(): 'mailbox' entry not found! "
+        if scalar(keys %mailboxes) == 0;
+
+
+}
+
+
+## @method readAgentSecion($ua_ref)
+sub readAgentSection {
+    my ($ua_ref) = @_; 
+    die "(!) readAgentSecion(): agent string  not found! "
+        if !exists $ua_ref->{'agent'};
+    die "(!) readAgentSecion(): agent timeout not found! "
+        if !exists $ua_ref->{'timeout'};
+    die "(!) readAgentSecion(): bad format for agent timeout! "
+        if $ua_ref->{'timeout'} !~ m{^\d+$};
+    $agent_ref = $ua_ref;
+}
+
+## @method void readSignalSection($signal_ref)
+# Read Signal Spam account(s)
+sub readSignalSection {
+        my ($signal_ref) = @_; 
+        die "(!) readSignalSection(): signal-spam URL not found! "
             if !exists $signal_ref->{'url'};
         $signalSpamURL = $signal_ref->{'url'};
-        die "(!) readConfig(): 'account' entry not found! "
+        die "(!) readSignalSection(): 'account' entry not found! "
             if !exists $signal_ref->{'account'};
         if ( ref( $signal_ref->{'account'} ) eq 'ARRAY' ) {
             foreach my $account_ref ( @{ $signal_ref->{'account'} } ) {
@@ -258,25 +291,44 @@ sub readConfig {
             putAccount( $signal_ref->{'account'} );
         }
         else {
-            die "Bad statement of the 'mailbox' section";
+            die "(!) readSignalSection bad statement" 
+                . " of the 'signal-spam' section";
         }
-
-        # read IMAP box(es)
-        die "(!) readConfig(): 'mailbox' entry not found! "
-            if !exists $config{'mailbox'};
-        if ( ref( $config{'mailbox'} ) eq 'ARRAY' ) {
-            foreach my $mailbox_ref ( @{ $config{'mailbox'} } ) {
-                putMailbox($mailbox_ref);
-            }
-        }
-        elsif ( ref( $config{'mailbox'} ) eq 'HASH' ) {
-            putMailbox( $config{'mailbox'} );
-        }
-        else {
-            die "Bad statement of the 'mailbox' section";
-        }
-    }
 }
+
+## @method void putAccount($account_ref)
+# @param $account_ref
+sub putAccount {
+    my ($account_ref) = @_;
+    die "(!)putAccount() account has not 'username'"
+        if !exists $account_ref->{'username'};
+    my $username = $account_ref->{'username'};
+    $defaultAccount = $username if !defined $defaultAccount;
+    die "(!)putAccount() duplicate '$username' username"
+        if exists $accounts{$username};
+    $accounts{$username} = $account_ref;
+    $account_ref->{'url'} = $signalSpamURL
+        if !exists $account_ref->{'url'};
+}
+
+## @method void readMailboxSections($mailbox_ref)
+sub readMailboxSections {
+  my ($mailboxes_ref) = @_;
+ if ( ref( $mailboxes_ref ) eq 'ARRAY' ) {
+    foreach my $mailbox_ref ( @{ $mailboxes_ref } ) {
+      putMailbox($mailbox_ref);
+    }
+  }
+  elsif ( ref( $mailboxes_ref ) eq 'HASH' ) {
+    putMailbox( $mailboxes_ref );
+  }
+  else {
+    die "readMailboxSections() bad statement "
+        . "of the 'mailbox' section";
+  }
+}
+
+
 
 ## @method void putMailbox($mailbox_ref)
 # @param $mailbox_ref
@@ -296,6 +348,7 @@ sub putMailbox {
     }
     else {
         my $delay = $mailbox_ref->{'delay'};
+        $delay = 0 if $ignoreDelay;
         if ( $delay =~ m{^(\d+)s?$} ) {
             $mailbox_ref->{'delay'} = $1;
         }
@@ -315,28 +368,14 @@ sub putMailbox {
     }
 }
 
-## @method void putAccount($account_ref)
-# @param $account_ref
-sub putAccount {
-    my ($account_ref) = @_;
-    die "(!)putAccount() account has not 'username'"
-        if !exists $account_ref->{'username'};
-    my $username = $account_ref->{'username'};
-    $defaultAccount = $username if !defined $defaultAccount;
-    die "(!)putAccount() duplicate '$username' username"
-        if exists $accounts{$username};
-    $accounts{$username} = $account_ref;
-    $account_ref->{'url'} = $signalSpamURL
-        if !exists $account_ref->{'url'};
-}
-
 ## @method void getOptions()
 sub getOptions {
     my %opt;
-    getopts( 'dvtb:', \%opt ) || HELP_MESSAGE();
+    getopts( 'idvtb:', \%opt ) || HELP_MESSAGE();
     $isVerbose   = 1         if exists $opt{'v'} and defined $opt{'v'};
     $isTest      = 1         if exists $opt{'t'} and defined $opt{'t'};
     $isDebug     = 1         if exists $opt{'d'} and defined $opt{'d'};
+    $ignoreDelay = 1         if exists $opt{'i'} and defined $opt{'i'};
     $boxIdFilter = $opt{'b'} if exists $opt{'b'} and defined $opt{'b'};
     print "isTest = $isTest" if $isTest;
 }
@@ -346,11 +385,12 @@ sub getOptions {
 sub HELP_MESSAGE {
     print <<ENDTXT;
 Usage: 
- imap2signal-spam.pl [-v -b boxId -t] 
+ imap2signal-spam.pl [-i -d -v -b boxId -t] 
   -v verbose mode
   -d debug mode
   -b boxId
   -t mode test 
+  -i ignore delay
 ENDTXT
     exit 0;
 }
