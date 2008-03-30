@@ -21,7 +21,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 # MA  02110-1301, USA.
-#/
+#
 use strict;
 use LWP::UserAgent;
 use Mail::IMAPClient;
@@ -61,6 +61,7 @@ my %month = (
     'Nov' => 11,
     'Dec' => 12
 );
+my $spamCounter = 0;
 
 print STDOUT "imap2signal-spam.pl";
 init();
@@ -75,7 +76,7 @@ sub END {
 sub run {
     foreach my $id ( keys %mailboxes ) {
         next if defined $boxIdFilter and $boxIdFilter ne $id;
-        print "read $id\n";
+        print STDOUT "\n(*) process '$id' box\n" if $isVerbose; 
         my $mailbox_ref = $mailboxes{$id};
         next if !$mailbox_ref->{'enabled'};
         my $account
@@ -83,11 +84,11 @@ sub run {
             ? $mailbox_ref->{'singal-spam-account'}
             : $defaultAccount;
         die "(!) run() '$account' not found" if !exists $accounts{$account};
-
         openBox($mailbox_ref);
         messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
     }
-
+    print STDOUT "(*) $spamCounter message(s) were reported"
+       if $isVerbose;
 }
 
 ## @method messagesProcess($account_ref)
@@ -114,14 +115,14 @@ sub messagesProcess {
 
         # check 09 Jul 1999 13:10:55 -0000 date format
         die "bad date format: $date"
-            if $date !~ m/^(\d{2})\-        #$1 = day of the month       
+            if $date !~ m/^(\d{2})\-       #$1 = day of the month       
                           ([a-zA-Z]{3})\-  #$2 = month
                           (\d{4})\         #$3 = year
                           (\d{2}):         #$4 = hour
                           (\d{2}):         #$5 = minute
                           (\d{2})\         #$6 = second
                           (\+|\-)\d{4}$/xms;
-        die "Bad month format: $2" if !exists $month{$2};
+        die "messagesProcess()  bad month format: $2" if !exists $month{$2};
 
         #timelocal($sec,$min,$hour,$mday,$mon,$year);
 
@@ -142,6 +143,7 @@ sub messagesProcess {
             or die "Could not delete_message: $@\n";
         print STDOUT "messagesProcess() The email has been deleted\n"
             if $isVerbose;
+        $spamCounter++;
     }
 }
 
@@ -166,8 +168,6 @@ sub post {
     print STDOUT "post() the email was submitted with the"
         . " '$account_ref->{'username'}' account\n"
         if $isVerbose;
-    #print $response->content;
-
 }
 
 ## @method void openBox($mailbox_ref)
@@ -191,8 +191,6 @@ sub openBox {
         'User'     => $mailbox_ref->{'username'},
         'Password' => $mailbox_ref->{'password'},
     ) or die "new(): $@";
-
-    #$client->Debug(1);
     $client->State( Mail::IMAPClient::Connected() );
     $client->login() or die 'login(): ' . $client->LastError();
 
@@ -218,7 +216,6 @@ sub closeBox {
 sub init {
     getOptions();
     readConfig();
-    print Dumper \%mailboxes;
     $user_agent = LWP::UserAgent->new(
         'agent'   => $agent_ref->{'agent'},
         'timeout' => $agent_ref->{'timeout'}
@@ -312,6 +309,7 @@ sub putAccount {
 }
 
 ## @method void readMailboxSections($mailbox_ref)
+# @param $mailboxes_ref
 sub readMailboxSections {
   my ($mailboxes_ref) = @_;
  if ( ref( $mailboxes_ref ) eq 'ARRAY' ) {
@@ -327,8 +325,6 @@ sub readMailboxSections {
         . "of the 'mailbox' section";
   }
 }
-
-
 
 ## @method void putMailbox($mailbox_ref)
 # @param $mailbox_ref
