@@ -82,10 +82,10 @@ sub run {
         info("(*) process '$id' box\n");
         my $mailbox_ref = $mailboxes{$id};
         next if !$mailbox_ref->{'enabled'};
-        my $account
-            = exists $mailbox_ref->{'singal-spam-account'}
-            ? $mailbox_ref->{'singal-spam-account'}
-            : $defaultAccount;
+        my $account =
+          exists $mailbox_ref->{'singal-spam-account'}
+          ? $mailbox_ref->{'singal-spam-account'}
+          : $defaultAccount;
         die "(!) run() '$account' not found" if !exists $accounts{$account};
         openBox($mailbox_ref);
         messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
@@ -99,25 +99,25 @@ sub messagesProcess {
     my ( $account_ref, $delay ) = @_;
     my @messages = $client->messages();
     print STDOUT "- messagesProcess() "
-        . scalar(@messages)
-        . " message(s) found\n"
-        if $isVerbose;
+      . scalar(@messages)
+      . " message(s) found\n"
+      if $isVerbose;
     my $count = 0;
     foreach my $msgId (@messages) {
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
-            or die "parse_headers failed: $@\n";
+          or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
         my $date    = $client->internaldate($msgId)
-            or die "Could not internaldate: $@\n";
+          or die "Could not internaldate: $@\n";
         print STDOUT sprintf( "%04d $date / $subject \n", $count )
-            if $isVerbose;
+          if $isVerbose;
 
         # check 09 Jul 1999 13:10:55 -0000 date format
         die "bad date format: $date"
-            if $date !~ m/^(\d{2})\-       #$1 = day of the month       
+          if $date !~ m/^(\d{2})\-       #$1 = day of the month       
                           ([a-zA-Z]{3})\-  #$2 = month
                           (\d{4})\         #$3 = year
                           (\d{2}):         #$4 = hour
@@ -132,19 +132,19 @@ sub messagesProcess {
         my $delta = time - $mailTime;
         if ( $delta < $delay ) {
             print STDOUT "messagesProcess() The email is ignored for "
-                . "the moment: $delta < $delay\n"
-                if $isVerbose;
+              . "the moment: $delta < $delay\n"
+              if $isVerbose;
             next;
         }
         my $string = $client->message_string($msgId)
-            or die "Could not message_string: $@\n";
+          or die "Could not message_string: $@\n";
 
         next if $isTest;
         post( $string, $account_ref );
         $client->delete_message($msgId)
-            or die "Could not delete_message: $@\n";
+          or die "Could not delete_message: $@\n";
         print STDOUT "messagesProcess() The email has been deleted\n"
-            if $isVerbose;
+          if $isVerbose;
         $spamCounter++;
     }
 }
@@ -168,8 +168,8 @@ sub post {
         die $message;
     }
     print STDOUT "post() the email was submitted with the"
-        . " '$account_ref->{'username'}' account\n"
-        if $isVerbose;
+      . " '$account_ref->{'username'}' account\n"
+      if $isVerbose;
 }
 
 ## @method void openBox($mailbox_ref)
@@ -184,7 +184,7 @@ sub openBox {
 
     my $greeting = <$socket>;
     print STDOUT $greeting
-        if $isVerbose;
+      if $isVerbose;
     my ( $id, $answer ) = split /\s+/, $greeting;
     die "problems logging in: $greeting" if $answer ne 'OK';
 
@@ -218,11 +218,14 @@ sub closeBox {
 sub init {
     getOptions();
     readConfig();
-		Sys::Syslog::setlogsock($sysLog_ref->{'sock_type'});
-		my $ident = $main::0;
-		$ident =~ s,^.*/([^/]*)$,$1,;
-    Sys::Syslog::openlog($ident, "ndelay,$sysLog_ref->{'logopt'}",
-                         $sysLog_ref->{'facility'});
+    Sys::Syslog::setlogsock( $sysLog_ref->{'sock_type'} );
+    my $ident = $main::0;
+    $ident =~ s,^.*/([^/]*)$,$1,;
+    Sys::Syslog::openlog(
+        $ident,
+        "ndelay,$sysLog_ref->{'logopt'}",
+        $sysLog_ref->{'facility'}
+    );
     $user_agent = LWP::UserAgent->new(
         'agent'   => $agent_ref->{'agent'},
         'timeout' => $agent_ref->{'timeout'}
@@ -238,84 +241,83 @@ sub readConfig {
         $confFound = 1;
         my %config = Config::General->new($filename)->getall();
 
-        readAgentSection($config{'user-agent'}) 
-            if exists $config{'user-agent'};
+        readAgentSection( $config{'user-agent'} )
+          if exists $config{'user-agent'};
 
         # read signal spam account(s)
-        readSignalSection($config{'signal-spam'})  
-            if exists $config{'signal-spam'};
+        readSignalSection( $config{'signal-spam'} )
+          if exists $config{'signal-spam'};
 
         # read IMAP box(es)
-        readMailboxSections($config{'mailbox'})  
-            if exists $config{'mailbox'};
+        readMailboxSections( $config{'mailbox'} )
+          if exists $config{'mailbox'};
 
-        if (exists $config{'syslog'}) {
-             $sysLog_ref = $config{'syslog'};
-             print Dumper $sysLog_ref;
-             
+        if ( exists $config{'syslog'} ) {
+            $sysLog_ref = $config{'syslog'};
+            print Dumper $sysLog_ref;
+
         }
         $confFound = 1;
     }
 
     die "(!) readConfig(): no configuration file has been found!"
-         if !$confFound;
+      if !$confFound;
     die "(!) readConfig(): 'syslog' section not found!"
-         if !defined $sysLog_ref;
+      if !defined $sysLog_ref;
     die "(!) readConfig(): 'user-agent' section not found! "
-        if !defined $agent_ref; 
+      if !defined $agent_ref;
     die "(!) readConfig(): 'signal-spam' entry not found! "
-        if scalar(keys %accounts) == 0;
+      if scalar( keys %accounts ) == 0;
     die "(!) readConfig(): 'mailbox' entry not found! "
-        if scalar(keys %mailboxes) == 0;
-
+      if scalar( keys %mailboxes ) == 0;
 
 }
 
 sub info {
     my ($message) = @_;
-    setlog('info', $message);
+    setlog( 'info', $message );
     print STDOUT $message
       if $isVerbose;
 }
 
 sub setlog {
-    my ($priorite, $message) = @_;
-		Sys::Syslog::syslog($priorite, '%s', $message);
+    my ( $priorite, $message ) = @_;
+    Sys::Syslog::syslog( $priorite, '%s', $message );
 }
 
 ## @method readAgentSecion($ua_ref)
 sub readAgentSection {
-    my ($ua_ref) = @_; 
+    my ($ua_ref) = @_;
     die "(!) readAgentSecion(): agent string  not found! "
-        if !exists $ua_ref->{'agent'};
+      if !exists $ua_ref->{'agent'};
     die "(!) readAgentSecion(): agent timeout not found! "
-        if !exists $ua_ref->{'timeout'};
+      if !exists $ua_ref->{'timeout'};
     die "(!) readAgentSecion(): bad format for agent timeout! "
-        if $ua_ref->{'timeout'} !~ m{^\d+$};
+      if $ua_ref->{'timeout'} !~ m{^\d+$};
     $agent_ref = $ua_ref;
 }
 
 ## @method void readSignalSection($signal_ref)
 # Read Signal Spam account(s)
 sub readSignalSection {
-        my ($signal_ref) = @_; 
-        die "(!) readSignalSection(): signal-spam URL not found! "
-            if !exists $signal_ref->{'url'};
-        $signalSpamURL = $signal_ref->{'url'};
-        die "(!) readSignalSection(): 'account' entry not found! "
-            if !exists $signal_ref->{'account'};
-        if ( ref( $signal_ref->{'account'} ) eq 'ARRAY' ) {
-            foreach my $account_ref ( @{ $signal_ref->{'account'} } ) {
-                putAccount($account_ref);
-            }
+    my ($signal_ref) = @_;
+    die "(!) readSignalSection(): signal-spam URL not found! "
+      if !exists $signal_ref->{'url'};
+    $signalSpamURL = $signal_ref->{'url'};
+    die "(!) readSignalSection(): 'account' entry not found! "
+      if !exists $signal_ref->{'account'};
+    if ( ref( $signal_ref->{'account'} ) eq 'ARRAY' ) {
+        foreach my $account_ref ( @{ $signal_ref->{'account'} } ) {
+            putAccount($account_ref);
         }
-        elsif ( ref( $signal_ref->{'account'} ) eq 'HASH' ) {
-            putAccount( $signal_ref->{'account'} );
-        }
-        else {
-            die "(!) readSignalSection bad statement" 
-                . " of the 'signal-spam' section";
-        }
+    }
+    elsif ( ref( $signal_ref->{'account'} ) eq 'HASH' ) {
+        putAccount( $signal_ref->{'account'} );
+    }
+    else {
+        die "(!) readSignalSection bad statement"
+          . " of the 'signal-spam' section";
+    }
 }
 
 ## @method void putAccount($account_ref)
@@ -323,32 +325,31 @@ sub readSignalSection {
 sub putAccount {
     my ($account_ref) = @_;
     die "(!)putAccount() account has not 'username'"
-        if !exists $account_ref->{'username'};
+      if !exists $account_ref->{'username'};
     my $username = $account_ref->{'username'};
     $defaultAccount = $username if !defined $defaultAccount;
     die "(!)putAccount() duplicate '$username' username"
-        if exists $accounts{$username};
+      if exists $accounts{$username};
     $accounts{$username} = $account_ref;
     $account_ref->{'url'} = $signalSpamURL
-        if !exists $account_ref->{'url'};
+      if !exists $account_ref->{'url'};
 }
 
 ## @method void readMailboxSections($mailbox_ref)
 # @param $mailboxes_ref
 sub readMailboxSections {
-  my ($mailboxes_ref) = @_;
- if ( ref( $mailboxes_ref ) eq 'ARRAY' ) {
-    foreach my $mailbox_ref ( @{ $mailboxes_ref } ) {
-      putMailbox($mailbox_ref);
+    my ($mailboxes_ref) = @_;
+    if ( ref($mailboxes_ref) eq 'ARRAY' ) {
+        foreach my $mailbox_ref ( @{$mailboxes_ref} ) {
+            putMailbox($mailbox_ref);
+        }
     }
-  }
-  elsif ( ref( $mailboxes_ref ) eq 'HASH' ) {
-    putMailbox( $mailboxes_ref );
-  }
-  else {
-    die "readMailboxSections() bad statement "
-        . "of the 'mailbox' section";
-  }
+    elsif ( ref($mailboxes_ref) eq 'HASH' ) {
+        putMailbox($mailboxes_ref);
+    }
+    else {
+        die "readMailboxSections() bad statement " . "of the 'mailbox' section";
+    }
 }
 
 ## @method void putMailbox($mailbox_ref)
@@ -356,14 +357,14 @@ sub readMailboxSections {
 sub putMailbox {
     my ($mailbox_ref) = @_;
     die "(!)putMailbox() mailbox has not 'id'"
-        if !exists $mailbox_ref->{'id'};
+      if !exists $mailbox_ref->{'id'};
     my $id = $mailbox_ref->{'id'};
     delete $mailbox_ref->{'id'};
     die "(!)putMailbox() duplicate mailbox '$id' id"
-        if exists $mailboxes{$id};
+      if exists $mailboxes{$id};
     $mailboxes{$id} = $mailbox_ref;
     $mailbox_ref->{'enabled'} = 1
-        if !exists $mailbox_ref->{'enabled'};
+      if !exists $mailbox_ref->{'enabled'};
     if ( !exists( $mailbox_ref->{'delay'} ) ) {
         $mailbox_ref->{'delay'} = 0;
     }
@@ -384,7 +385,7 @@ sub putMailbox {
         }
         else {
             die "bad delay format: $delay. "
-                . "Format excepted: 60, 60s, 60m, 24h or 15d";
+              . "Format excepted: 60, 60s, 60m, 24h or 15d";
         }
     }
 }
