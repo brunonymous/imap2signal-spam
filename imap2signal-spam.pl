@@ -32,6 +32,7 @@ use List::Util qw( first );
 use Config::General;
 use Getopt::Std;
 use Time::Local 'timelocal';
+use Sys::Syslog;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 my $agent_ref;
@@ -70,6 +71,7 @@ run();
 ## @method void END()
 sub END {
     closeBox();
+    Sys::Syslog::closelog();
 }
 
 ## @method void run()
