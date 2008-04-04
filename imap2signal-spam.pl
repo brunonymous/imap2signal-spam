@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-03-30
+# @date 2008-04-04
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -39,6 +39,7 @@ my $agent_ref;
 my %mailboxes = ();
 my $signalSpamURL;
 my %accounts = ();
+my $sysLog_ref;
 my $defaultAccount;
 my $configFileName = 'imap2signal-spam.conf';
 my $isVerbose      = 0;
@@ -78,7 +79,7 @@ sub END {
 sub run {
     foreach my $id ( keys %mailboxes ) {
         next if defined $boxIdFilter and $boxIdFilter ne $id;
-        print STDOUT "\n(*) process '$id' box\n" if $isVerbose; 
+        info("(*) process '$id' box\n");
         my $mailbox_ref = $mailboxes{$id};
         next if !$mailbox_ref->{'enabled'};
         my $account
@@ -89,8 +90,7 @@ sub run {
         openBox($mailbox_ref);
         messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
     }
-    print STDOUT "(*) $spamCounter message(s) were reported"
-       if $isVerbose;
+    info("(*) $spamCounter message(s) were reported\n");
 }
 
 ## @method messagesProcess($account_ref)
@@ -218,6 +218,11 @@ sub closeBox {
 sub init {
     getOptions();
     readConfig();
+		Sys::Syslog::setlogsock($sysLog_ref->{'sock_type'});
+		my $ident = $main::0;
+		$ident =~ s,^.*/([^/]*)$,$1,;
+    Sys::Syslog::openlog($ident, "ndelay,$sysLog_ref->{'logopt'}",
+                         $sysLog_ref->{'facility'});
     $user_agent = LWP::UserAgent->new(
         'agent'   => $agent_ref->{'agent'},
         'timeout' => $agent_ref->{'timeout'}
@@ -227,7 +232,7 @@ sub init {
 ## @method void readConfig()
 sub readConfig {
     my $confFound = 0;
-    foreach my $pathname ( '.', $ENV{'HOME'} . '/.imap2signal-spam', '/etc' ) {
+    foreach my $pathname ( '.', '/etc', $ENV{'HOME'} . '/.imap2signal-spam' ) {
         my $filename = $pathname . '/' . $configFileName;
         next if !-e $filename;
         $confFound = 1;
@@ -243,12 +248,19 @@ sub readConfig {
         # read IMAP box(es)
         readMailboxSections($config{'mailbox'})  
             if exists $config{'mailbox'};
-        
-       $confFound = 1;
+
+        if (exists $config{'syslog'}) {
+             $sysLog_ref = $config{'syslog'};
+             print Dumper $sysLog_ref;
+             
+        }
+        $confFound = 1;
     }
 
-    die "No configuration file has been found!"
+    die "(!) readConfig(): no configuration file has been found!"
          if !$confFound;
+    die "(!) readConfig(): 'syslog' section not found!"
+         if !defined $sysLog_ref;
     die "(!) readConfig(): 'user-agent' section not found! "
         if !defined $agent_ref; 
     die "(!) readConfig(): 'signal-spam' entry not found! "
@@ -259,6 +271,17 @@ sub readConfig {
 
 }
 
+sub info {
+    my ($message) = @_;
+    setlog('info', $message);
+    print STDOUT $message
+      if $isVerbose;
+}
+
+sub setlog {
+    my ($priorite, $message) = @_;
+		Sys::Syslog::syslog($priorite, '%s', $message);
+}
 
 ## @method readAgentSecion($ua_ref)
 sub readAgentSection {
@@ -375,7 +398,7 @@ sub getOptions {
     $isDebug     = 1         if exists $opt{'d'} and defined $opt{'d'};
     $ignoreDelay = 1         if exists $opt{'i'} and defined $opt{'i'};
     $boxIdFilter = $opt{'b'} if exists $opt{'b'} and defined $opt{'b'};
-    print "isTest = $isTest" if $isTest;
+    print STDOUT "isTest = $isTest\n" if $isTest;
 }
 
 ## @method void HELP_MESSAGE()
