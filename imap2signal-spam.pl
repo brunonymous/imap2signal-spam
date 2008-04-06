@@ -280,8 +280,6 @@ sub readConfig {
     }
     die "(!) readConfig(): no configuration file has been found!"
       if !$confFound;
-    die "(!) readConfig(): 'syslog' section not found!"
-      if !defined $sysLog_ref;
     die "(!) readConfig(): 'user-agent' section not found! "
       if !defined $agent_ref;
     die "(!) readConfig(): 'signal-spam' entry not found! "
