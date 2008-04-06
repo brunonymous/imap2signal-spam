@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-04-04
+# @date 2008-04-06
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -65,7 +65,6 @@ my %month = (
 );
 my $spamCounter = 0;
 
-print STDOUT "imap2signal-spam.pl";
 init();
 run();
 
@@ -176,23 +175,34 @@ sub post {
 # @params $mailbox_ref
 sub openBox {
     my ($mailbox_ref) = @_;
+    my $port = $mailbox_ref->{'port'};
 
-    my $socket = IO::Socket::SSL->new(
-        'PeerAddr' => $mailbox_ref->{'server'},
-        'PeerPort' => $mailbox_ref->{'port'},
-    ) or die "socket(): $@";
+    # IMAP over SSL
+    if ( $port = 993 ) {
+        my $socket = IO::Socket::SSL->new(
+            'PeerAddr' => $mailbox_ref->{'server'},
+            'PeerPort' => $port
+        ) or die "socket(): $@";
+        my $greeting = <$socket>;
+        print STDOUT $greeting
+          if $isVerbose;
+        my ( $id, $answer ) = split /\s+/, $greeting;
+        die "problems logging in: $greeting" if $answer ne 'OK';
+        $client = Mail::IMAPClient->new(
+            'Socket'   => $socket,
+            'User'     => $mailbox_ref->{'username'},
+            'Password' => $mailbox_ref->{'password'},
+        ) or die "new(): $@";
 
-    my $greeting = <$socket>;
-    print STDOUT $greeting
-      if $isVerbose;
-    my ( $id, $answer ) = split /\s+/, $greeting;
-    die "problems logging in: $greeting" if $answer ne 'OK';
+        # IMAP
+    }
+    else {
+        $client = Mail::IMAPClient->new(
+            'User'     => $mailbox_ref->{'username'},
+            'Password' => $mailbox_ref->{'password'},
+        ) or die "new(): $@";
+    }
 
-    $client = Mail::IMAPClient->new(
-        'Socket'   => $socket,
-        'User'     => $mailbox_ref->{'username'},
-        'Password' => $mailbox_ref->{'password'},
-    ) or die "new(): $@";
     $client->State( Mail::IMAPClient::Connected() );
     $client->login() or die 'login(): ' . $client->LastError();
 
@@ -208,7 +218,8 @@ sub openBox {
 ## @method void closeBox()
 sub closeBox {
     if ( defined $client and $client->IsAuthenticated() ) {
-        print "(*) logout\n";
+        print "(*) logout\n"
+          if $isVerbose;
         $client->logout();
         undef($client);
     }
@@ -217,15 +228,19 @@ sub closeBox {
 ## @method void init()
 sub init {
     getOptions();
+    print STDOUT 'imap2signal-spam.pl $Revision$' . "\n"
+      if $isVerbose;
     readConfig();
-    Sys::Syslog::setlogsock( $sysLog_ref->{'sock_type'} );
-    my $ident = $main::0;
-    $ident =~ s,^.*/([^/]*)$,$1,;
-    Sys::Syslog::openlog(
-        $ident,
-        "ndelay,$sysLog_ref->{'logopt'}",
-        $sysLog_ref->{'facility'}
-    );
+    if ( defined $sysLog_ref ) {
+        Sys::Syslog::setlogsock( $sysLog_ref->{'sock_type'} );
+        my $ident = $main::0;
+        $ident =~ s,^.*/([^/]*)$,$1,;
+        Sys::Syslog::openlog(
+            $ident,
+            "ndelay,$sysLog_ref->{'logopt'}",
+            $sysLog_ref->{'facility'}
+        );
+    }
     $user_agent = LWP::UserAgent->new(
         'agent'   => $agent_ref->{'agent'},
         'timeout' => $agent_ref->{'timeout'}
@@ -254,12 +269,15 @@ sub readConfig {
 
         if ( exists $config{'syslog'} ) {
             $sysLog_ref = $config{'syslog'};
-            print Dumper $sysLog_ref;
-
+            die "(!) readConfig(): 'logopt' not found"
+              if !exists $sysLog_ref->{'logopt'};
+            die "(!) readConfig(): 'facility' not found"
+              if !exists $sysLog_ref->{'facility'};
+            die "(!) readConfig(): 'sock_type' not found"
+              if !exists $sysLog_ref->{'sock_type'};
         }
         $confFound = 1;
     }
-
     die "(!) readConfig(): no configuration file has been found!"
       if !$confFound;
     die "(!) readConfig(): 'syslog' section not found!"
@@ -270,9 +288,9 @@ sub readConfig {
       if scalar( keys %accounts ) == 0;
     die "(!) readConfig(): 'mailbox' entry not found! "
       if scalar( keys %mailboxes ) == 0;
-
 }
 
+## @method void info($message)
 sub info {
     my ($message) = @_;
     setlog( 'info', $message );
@@ -280,12 +298,15 @@ sub info {
       if $isVerbose;
 }
 
+## @method void setlog($priorite, $message)
 sub setlog {
     my ( $priorite, $message ) = @_;
+    return if !defined $sysLog_ref;
     Sys::Syslog::syslog( $priorite, '%s', $message );
 }
 
 ## @method readAgentSecion($ua_ref)
+# @param ua_ref Anonymous hash
 sub readAgentSection {
     my ($ua_ref) = @_;
     die "(!) readAgentSecion(): agent string  not found! "
