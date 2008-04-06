@@ -63,10 +63,18 @@ my %month = (
     'Nov' => 11,
     'Dec' => 12
 );
-my $spamCounter = 0;
+my $spamCounter        = 0;
+my $spamIgnoredCounter = 0;
 
-init();
-run();
+eval {
+    init();
+    run();
+};
+if ($@) {
+    sayError($@);
+    sayError("(!) imap2signal-spam.pl failed!");
+    die $@;
+}
 
 ## @method void END()
 sub END {
@@ -78,18 +86,28 @@ sub END {
 sub run {
     foreach my $id ( keys %mailboxes ) {
         next if defined $boxIdFilter and $boxIdFilter ne $id;
-        info("(*) process '$id' box\n");
         my $mailbox_ref = $mailboxes{$id};
-        next if !$mailbox_ref->{'enabled'};
+        if ( !$mailbox_ref->{'enabled'} ) {
+            sayInfo("(*) '$id' box is disabled\n");
+            next;
+        }
+        sayInfo("(*) process '$id' box\n");
         my $account =
           exists $mailbox_ref->{'singal-spam-account'}
           ? $mailbox_ref->{'singal-spam-account'}
           : $defaultAccount;
         die "(!) run() '$account' not found" if !exists $accounts{$account};
-        openBox($mailbox_ref);
-        messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
+        eval {
+            openBox($mailbox_ref);
+            messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
+        };
+        if ($@) {
+            sayError($@);
+            next;
+        }
     }
-    info("(*) $spamCounter message(s) were reported\n");
+    sayInfo("(*) $spamCounter message(s) were reported\n");
+    sayInfo("(*) $spamIgnoredCounter message(s) were ignored\n");
 }
 
 ## @method messagesProcess($account_ref)
@@ -133,6 +151,7 @@ sub messagesProcess {
             print STDOUT "messagesProcess() The email is ignored for "
               . "the moment: $delta < $delay\n"
               if $isVerbose;
+            $spamIgnoredCounter++;
             next;
         }
         my $string = $client->message_string($msgId)
@@ -175,14 +194,15 @@ sub post {
 # @params $mailbox_ref
 sub openBox {
     my ($mailbox_ref) = @_;
-    my $port = $mailbox_ref->{'port'};
+    my $port          = $mailbox_ref->{'port'};
+    my $username      = $mailbox_ref->{'username'};
 
     # IMAP over SSL
     if ( $port = 993 ) {
         my $socket = IO::Socket::SSL->new(
             'PeerAddr' => $mailbox_ref->{'server'},
             'PeerPort' => $port
-        ) or die "socket(): $@";
+        ) or die "openBox($username) new IO::Socket::SSLsocket() failed: $@";
         my $greeting = <$socket>;
         print STDOUT $greeting
           if $isVerbose;
@@ -190,29 +210,34 @@ sub openBox {
         die "problems logging in: $greeting" if $answer ne 'OK';
         $client = Mail::IMAPClient->new(
             'Socket'   => $socket,
-            'User'     => $mailbox_ref->{'username'},
+            'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
-        ) or die "new(): $@";
+        ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
 
-        # IMAP
     }
     else {
+
+        # IMAP
         $client = Mail::IMAPClient->new(
-            'User'     => $mailbox_ref->{'username'},
+            'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
-        ) or die "new(): $@";
+        ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
     }
 
     $client->State( Mail::IMAPClient::Connected() );
-    $client->login() or die 'login(): ' . $client->LastError();
+    $client->login()
+      or die "openBox($username): " . "login() failed " . $client->LastError();
 
     if ($isDebug) {
         my @folders = $client->folders();
         print STDOUT join( "\n* ", 'Folders:', @folders ), "\n";
     }
 
-    $client->select( $mailbox_ref->{'junk'} ) or die $client->LastError();
-
+    $client->select( $mailbox_ref->{'junk'} )
+      or die "openBox($username) "
+      . "Mail::IMAPClient::select($mailbox_ref->{'junk'}) "
+      . "failed: "
+      . $client->LastError();
 }
 
 ## @method void closeBox()
@@ -288,15 +313,28 @@ sub readConfig {
       if scalar( keys %mailboxes ) == 0;
 }
 
-## @method void info($message)
-sub info {
+## @method void sayError($message)
+# @param message Error message
+sub sayError {
     my ($message) = @_;
+    $message =~ s{(\n|\r)}{}g;
     setlog( 'info', $message );
-    print STDOUT $message
+    print STDERR $message . "\n"
+      if $isVerbose;
+}
+
+## @method void sayInfo($message)
+# @param message Info message
+sub sayInfo {
+    my ($message) = @_;
+    $message =~ s{(\n|\r)}{}g;
+    setlog( 'info', $message );
+    print STDOUT $message . "\n"
       if $isVerbose;
 }
 
 ## @method void setlog($priorite, $message)
+# @param priorite Level: 'info', 'error', 'debug' or 'warning'
 sub setlog {
     my ( $priorite, $message ) = @_;
     return if !defined $sysLog_ref;
