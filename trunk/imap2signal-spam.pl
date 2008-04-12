@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-04-06
+# @date 2008-04-12
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -106,8 +106,8 @@ sub run {
             next;
         }
     }
-    sayInfo("(*) $spamCounter message(s) were reported\n");
-    sayInfo("(*) $spamIgnoredCounter message(s) were ignored\n");
+    sayInfo("(*) total number of message(s) reported: $spamCounter\n");
+    sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter\n");
 }
 
 ## @method messagesProcess($account_ref)
@@ -119,7 +119,9 @@ sub messagesProcess {
       . scalar(@messages)
       . " message(s) found\n"
       if $isVerbose;
-    my $count = 0;
+    my $count                 = 0;
+    my $boxSpamCounter        = 0;
+    my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
@@ -152,6 +154,7 @@ sub messagesProcess {
               . "the moment: $delta < $delay\n"
               if $isVerbose;
             $spamIgnoredCounter++;
+            $boxSpamIgnoredCounter++;
             next;
         }
         my $string = $client->message_string($msgId)
@@ -164,7 +167,10 @@ sub messagesProcess {
         print STDOUT "messagesProcess() The email has been deleted\n"
           if $isVerbose;
         $spamCounter++;
+        $boxSpamCounter++;
     }
+    sayInfo(" - $boxSpamCounter message(s) were reported\n");
+    sayInfo(" - $boxSpamIgnoredCounter message(s) were ignored\n");
 }
 
 ## @method void post($msg, account_ref)
