@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-04-12
+# @date 2008-05-23
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -123,9 +123,11 @@ sub messagesProcess {
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
+        print STDOUT "- messagesProcess() flag($msgId)\n" if $isDebug; 
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
+        print STDOUT "- messagesProcess() parse_headers($msgId)\n" if $isDebug; 
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
           or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
@@ -159,6 +161,9 @@ sub messagesProcess {
         }
         my $string = $client->message_string($msgId)
           or die "Could not message_string: $@\n";
+        
+        print $string;
+        last;
 
         next if $isTest;
         post( $string, $account_ref );
@@ -204,7 +209,8 @@ sub openBox {
     my $username      = $mailbox_ref->{'username'};
 
     # IMAP over SSL
-    if ( $port = 993 ) {
+    print "$port !!!!!!!\n";
+    if ( $port == 993 ) {
         my $socket = IO::Socket::SSL->new(
             'PeerAddr' => $mailbox_ref->{'server'},
             'PeerPort' => $port
@@ -218,21 +224,26 @@ sub openBox {
             'Socket'   => $socket,
             'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
+            'Debug'    => 1,
+            'Timeout'  => 60
         ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
-
+        $client->login()
+          or die "openBox($username): " . "login() failed " . $client->LastError();
     }
     else {
+      print "$port !!!!!!!\n";
 
         # IMAP
         $client = Mail::IMAPClient->new(
             'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
+            'Timeout'  => 60,
+            'Debug'    => 0,
+            'Server'   => $mailbox_ref->{'server'},
         ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
     }
 
     $client->State( Mail::IMAPClient::Connected() );
-    $client->login()
-      or die "openBox($username): " . "login() failed " . $client->LastError();
 
     if ($isDebug) {
         my @folders = $client->folders();
