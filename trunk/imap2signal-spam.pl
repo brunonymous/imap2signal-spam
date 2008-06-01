@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-05-23
+# @date 2008-06-01
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -207,11 +207,12 @@ sub openBox {
     my ($mailbox_ref) = @_;
     my $port          = $mailbox_ref->{'port'};
     my $username      = $mailbox_ref->{'username'};
+   my $socket;
 
     # IMAP over SSL
-    print "$port !!!!!!!\n";
     if ( $port == 993 ) {
-        my $socket = IO::Socket::SSL->new(
+        $socket = IO::Socket::SSL->new(
+            'Proto'    => 'tcp',
             'PeerAddr' => $mailbox_ref->{'server'},
             'PeerPort' => $port
         ) or die "openBox($username) new IO::Socket::SSLsocket() failed: $@";
@@ -224,15 +225,16 @@ sub openBox {
             'Socket'   => $socket,
             'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
-            'Debug'    => 1,
-            'Timeout'  => 60
+            #'Debug'    => 1,
+            'Server'   => $mailbox_ref->{'server'},
+            'Uid'      => 1,
+            'Peek'     => 1,
+              #'Timeout'  => 60
         ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
         $client->login()
           or die "openBox($username): " . "login() failed " . $client->LastError();
     }
     else {
-      print "$port !!!!!!!\n";
-
         # IMAP
         $client = Mail::IMAPClient->new(
             'User'     => $username,
@@ -244,6 +246,8 @@ sub openBox {
     }
 
     $client->State( Mail::IMAPClient::Connected() );
+    #$client->Socket($socket);
+
 
     if ($isDebug) {
         my @folders = $client->folders();
