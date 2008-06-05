@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2008-06-01
+# @date 2008-06-05
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2008 TLK Games all rights reserved
@@ -123,11 +123,13 @@ sub messagesProcess {
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
-        print STDOUT "- messagesProcess() flag($msgId)\n" if $isDebug; 
+        print STDOUT "- messagesProcess() flag($msgId)\n" if $isDebug;
+
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
-        print STDOUT "- messagesProcess() parse_headers($msgId)\n" if $isDebug; 
+
+        print STDOUT "- messagesProcess() parse_headers($msgId)\n" if $isDebug;
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
           or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
@@ -161,10 +163,8 @@ sub messagesProcess {
         }
         my $string = $client->message_string($msgId)
           or die "Could not message_string: $@\n";
-        
-        print $string;
-        last;
 
+        #"print $string;
         next if $isTest;
         post( $string, $account_ref );
         $client->delete_message($msgId)
@@ -207,7 +207,7 @@ sub openBox {
     my ($mailbox_ref) = @_;
     my $port          = $mailbox_ref->{'port'};
     my $username      = $mailbox_ref->{'username'};
-   my $socket;
+    my $socket;
 
     # IMAP over SSL
     if ( $port == 993 ) {
@@ -225,16 +225,21 @@ sub openBox {
             'Socket'   => $socket,
             'User'     => $username,
             'Password' => $mailbox_ref->{'password'},
-            #'Debug'    => 1,
+            'Debug'    => 0,
             'Server'   => $mailbox_ref->{'server'},
             'Uid'      => 1,
+            'Fast_IO'  => 1,
             'Peek'     => 1,
-              #'Timeout'  => 60
+
+            #'Timeout'  => 60
         ) or die "openBox($username) new Mail::IMAPClient() failed: $@";
         $client->login()
-          or die "openBox($username): " . "login() failed " . $client->LastError();
+          or die "openBox($username): "
+          . "login() failed "
+          . $client->LastError();
     }
     else {
+
         # IMAP
         $client = Mail::IMAPClient->new(
             'User'     => $username,
@@ -246,8 +251,8 @@ sub openBox {
     }
 
     $client->State( Mail::IMAPClient::Connected() );
-    #$client->Socket($socket);
 
+    #$client->Socket($socket);
 
     if ($isDebug) {
         my @folders = $client->folders();
