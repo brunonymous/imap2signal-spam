@@ -115,29 +115,25 @@ sub run {
 sub messagesProcess {
     my ( $account_ref, $delay ) = @_;
     my @messages = $client->messages();
-    print STDOUT "- messagesProcess() "
-        . scalar(@messages)
-        . " message(s) found\n"
-        if $isVerbose;
+    sayInfo(
+        "- messagesProcess() " . scalar(@messages) . " message(s) found\n" );
     my $count                 = 0;
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
-        print STDOUT "- messagesProcess() flag($msgId)\n" if $isDebug;
+        sayInfo("- messagesProcess() flag($msgId)\n");
 
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
 
-        print STDOUT "- messagesProcess() parse_headers($msgId)\n"
-            if $isDebug;
+        sayInfo("- messagesProcess() parse_headers($msgId)\n");
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
         my $date    = $client->internaldate($msgId)
             or die "Could not internaldate: $@\n";
-        print STDOUT sprintf( "%04d $date / $subject \n", $count )
-            if $isVerbose;
+        sayInfo( sprintf( "%04d $date / $subject \n", $count ) );
 
         # check 09 Jul 1999 13:10:55 -0000 date format
         die "bad date format: $date"
@@ -160,17 +156,15 @@ sub messagesProcess {
         if ( defined $mailTime ) {
             my $delta = time - $mailTime;
             if ( $delta < $delay ) {
-                print STDOUT "messagesProcess() The email is ignored for "
-                    . "the moment: $delta < $delay\n"
-                    if $isVerbose;
+                sayInfo(  "messagesProcess() The email is ignored for "
+                        . "the moment: $delta < $delay\n" );
                 $spamIgnoredCounter++;
                 $boxSpamIgnoredCounter++;
                 next;
             }
         }
         else {
-            print STDERR "messagesProcess() $date not valid\n";
-            next;
+            sayError("messagesProcess() $date not valid\n");
         }
         my $string = $client->message_string($msgId)
             or die "Could not message_string: $@\n";
@@ -180,8 +174,7 @@ sub messagesProcess {
         post( $string, $account_ref );
         $client->delete_message($msgId)
             or die "Could not delete_message: $@\n";
-        print STDOUT "messagesProcess() The email has been deleted\n"
-            if $isVerbose;
+        sayInfo("messagesProcess() The email has been deleted\n");
         $spamCounter++;
         $boxSpamCounter++;
     }
@@ -207,9 +200,8 @@ sub post {
         my $message = $response->status_line();
         die $message;
     }
-    print STDOUT "post() the email was submitted with the"
-        . " '$account_ref->{'username'}' account\n"
-        if $isVerbose;
+    sayInfo(  "post() the email was submitted with the"
+            . " '$account_ref->{'username'}' account\n" );
 }
 
 ## @method void openBox($mailbox_ref)
@@ -230,8 +222,7 @@ sub openBox {
             or die
             "openBox($username) new IO::Socket::SSLsocket() failed: $@";
         my $greeting = <$socket>;
-        print STDOUT $greeting
-            if $isVerbose;
+        sayInfo($greeting);
         my ( $id, $answer ) = split /\s+/, $greeting;
         die "problems logging in: $greeting" if $answer ne 'OK';
         $client = Mail::IMAPClient->new(
@@ -269,7 +260,7 @@ sub openBox {
 
     if ($isDebug) {
         my @folders = $client->folders();
-        print STDOUT join( "\n* ", 'Folders:', @folders ), "\n";
+        sayDebug( join( "\n* ", 'Folders:', @folders ), "\n" );
     }
 
     $client->select( $mailbox_ref->{'junk'} )
@@ -282,8 +273,7 @@ sub openBox {
 ## @method void closeBox()
 sub closeBox {
     if ( defined $client and $client->IsAuthenticated() ) {
-        print "(*) logout\n"
-            if $isVerbose;
+        sayInfo("(*) logout\n");
         $client->logout();
         undef($client);
     }
@@ -366,6 +356,17 @@ sub sayError {
 ## @method void sayInfo($message)
 # @param message Info message
 sub sayInfo {
+    my ($message) = @_;
+    $message =~ s{(\n|\r)}{}g;
+    setlog( 'info', $message );
+    print STDOUT $message . "\n"
+        if $isVerbose;
+}
+
+## @method void sayDebug($message)
+# @param message Debug message
+sub sayDebug {
+    return if !$isDebug;
     my ($message) = @_;
     $message =~ s{(\n|\r)}{}g;
     setlog( 'info', $message );
