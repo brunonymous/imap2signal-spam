@@ -1,10 +1,10 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2009-03-28
+# @date 2009-05-14
 # http://code.google.com/p/imap2signal-spam/
 #
-# copyright (c) 2008 TLK Games all rights reserved
+# copyright (c) 2008-2009 TLK Games all rights reserved
 # $Id$
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
@@ -33,6 +33,7 @@ use Config::General;
 use Getopt::Std;
 use Time::Local 'timelocal';
 use Sys::Syslog;
+use Mail::Internet;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 my $agent_ref;
@@ -97,9 +98,14 @@ sub run {
             ? $mailbox_ref->{'singal-spam-account'}
             : $defaultAccount;
         die "(!) run() '$account' not found" if !exists $accounts{$account};
+        my $subjectRegex;
+        if ( exists $mailbox_ref->{'subject-regex'} ) {
+            $subjectRegex = $mailbox_ref->{'subject-regex'};
+        }
         eval {
             openBox($mailbox_ref);
-            messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'} );
+            messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'},
+                $subjectRegex );
         };
         if ($@) {
             sayError($@);
@@ -113,7 +119,7 @@ sub run {
 ## @method messagesProcess($account_ref)
 # @param $account_ref
 sub messagesProcess {
-    my ( $account_ref, $delay ) = @_;
+    my ( $account_ref, $delay, $subjectRegex ) = @_;
     my @messages = $client->messages();
     sayInfo(
         "- messagesProcess() " . scalar(@messages) . " message(s) found\n" );
@@ -121,19 +127,19 @@ sub messagesProcess {
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
-        sayInfo("- messagesProcess() flag($msgId)\n");
+        sayDebug("- messagesProcess() flag($msgId)\n");
 
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
 
-        sayInfo("- messagesProcess() parse_headers($msgId)\n");
+        sayDebug("- messagesProcess() parse_headers($msgId)\n");
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
         my $date    = $client->internaldate($msgId)
             or die "Could not internaldate: $@\n";
-        sayInfo( sprintf( "%04d $date / $subject \n", $count ) );
+        sayInfo( sprintf( "%04d", $count ) . "$date / $subject \n" );
 
         # check 09 Jul 1999 13:10:55 -0000 date format
         die "bad date format: $date"
@@ -168,6 +174,19 @@ sub messagesProcess {
         }
         my $string = $client->message_string($msgId)
             or die "Could not message_string: $@\n";
+
+        # FIXME try to remove the "*****SPAM*****" string ,
+        # but Mail::Intenet modify the original e-mail :-( 
+        if ( defined $subjectRegex ) {
+            my @arrayMail = split( /\n/, $string );
+            my $email = Mail::Internet->new( \@arrayMail );
+            $subject = $email->get('Subject');
+            $subject =~ s{(\n|\r)}{}g;
+            $subject =~ s{$subjectRegex}{$1};
+            $email->replace( 'Subject' => $subject );
+            $subject = $email->get('Subject');
+            $string  = $email->as_string();
+        }
 
         #"print $string;
         next if $isTest;
@@ -499,6 +518,17 @@ sub getOptions {
     $ignoreDelay = 1         if exists $opt{'i'} and defined $opt{'i'};
     $boxIdFilter = $opt{'b'} if exists $opt{'b'} and defined $opt{'b'};
     print STDOUT "isTest = $isTest\n" if $isTest;
+}
+
+## @method void writeFile($filename, $string)
+sub writeFile {
+    my ( $filename, $string ) = @_;
+    my $fh;
+    if ( !open( $fh, '>', $filename ) ) {
+        sayError("$!");
+    }
+    print $fh $string;
+    close $fh;
 }
 
 ## @method void HELP_MESSAGE()
