@@ -137,7 +137,7 @@ sub messagesProcess {
 
         if ( defined $mailTime ) {
             my $delta = time - $mailTime;
-            if ( $delta < $delay ) {
+            if ( $delay > 0 and $delta < $delay ) {
                 sayInfo(  "messagesProcess() The email is ignored for "
                         . "the moment: $delta < $delay" );
                 $spamIgnoredCounter++;
@@ -192,22 +192,27 @@ sub spamcopLogin {
 sub spamcomProcess {
     my ($spam) = @_;
 
-    $mech->form_number(2);
-
-    # Click on "Process Spam"
+    my $form = $mech->form_number(2);
+    if (! defined $form ) {
+        die sayError("WWW::Mechanize::form_number(2) was failed");
+    }
+    sayDebug('Form action: ' . $form->action() );
     $mech->field( 'spam', $spam );
+    sayDebug('Click on "Process Spam" button');
     my $response = $mech->click();
-    die sayError("WWW::Mechanize:click was failed") if !defined $response;
+    die sayError("WWW::Mechanize::click() was failed") if !defined $response;
     if ( !$response->is_success() ) {
         my $message = $response->status_line();
         die sayError($message);
     }
 
-    $mech->form_number(2);
-
-    # Click on "Send Spam Report(s) Now"
+    $form = $mech->form_number(2);
+    if (! defined $form ) {
+        die sayError("WWW::Mechanize::form_number(2) was failed");
+    }
+    sayDebug('Click on "Send Spam Report(s) Now"');
     $response = $mech->click();
-    die sayError("WWW::Mechanize:click was failed") if !defined $response;
+    die sayError("WWW::Mechanize::click() was failed") if !defined $response;
     if ( !$response->is_success() ) {
         my $message = $response->status_line();
         die sayError($message);
