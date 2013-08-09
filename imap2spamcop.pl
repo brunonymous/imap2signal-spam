@@ -75,13 +75,13 @@ sub run {
         next if defined $boxIdFilter and $boxIdFilter ne $id;
         my $mailbox_ref = $mailboxes{$id};
         if ( !$mailbox_ref->{'enabled'} ) {
-            sayInfo("(*) '$id' box is disabled\n");
+            sayInfo("(*) '$id' box is disabled");
             next;
         }
-        sayInfo("(*) process '$id' box\n");
+        sayInfo("(*) process '$id' box");
         my $account
-            = exists $mailbox_ref->{'singal-spam-account'}
-            ? $mailbox_ref->{'singal-spam-account'}
+            = exists $mailbox_ref->{'spamcop-account'}
+            ? $mailbox_ref->{'spamcop-account'}
             : $defaultAccount;
         die sayError("(!) run() '$account' not found")
             if !exists $accounts{$account};
@@ -103,8 +103,8 @@ sub run {
             next;
         }
     }
-    sayInfo("(*) total number of message(s) reported: $spamCounter\n");
-    sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter\n");
+    sayInfo("(*) total number of message(s) reported: $spamCounter");
+    sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter");
 }
 
 sub messagesProcess {
@@ -113,24 +113,24 @@ sub messagesProcess {
     my @messages = $client->messages();
 
     sayInfo(
-        "- messagesProcess() " . scalar(@messages) . " message(s) found\n" );
+        "- messagesProcess() " . scalar(@messages) . " message(s) found" );
     my $count                 = 0;
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
     foreach my $msgId (@messages) {
-        sayDebug("- messagesProcess() flag($msgId)\n");
+        sayDebug("- messagesProcess() flag($msgId)");
 
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
 
-        sayDebug("- messagesProcess() parse_headers($msgId)\n");
+        sayDebug("- messagesProcess() parse_headers($msgId)");
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die sayError("parse_headers failed: $@");
         my $subject = $hashref->{'Subject'}->[0];
         my $date    = $client->internaldate($msgId)
             or die sayError("Could not internaldate: $@");
-        sayInfo( sprintf( "%04d", $count ) . "$date / $subject \n" );
+        sayInfo( sprintf( "%04d", $count ) . "$date / $subject" );
 
         #next;
         my $mailTime = str2time($date);
@@ -139,14 +139,14 @@ sub messagesProcess {
             my $delta = time - $mailTime;
             if ( $delta < $delay ) {
                 sayInfo(  "messagesProcess() The email is ignored for "
-                        . "the moment: $delta < $delay\n" );
+                        . "the moment: $delta < $delay" );
                 $spamIgnoredCounter++;
                 $boxSpamIgnoredCounter++;
                 next;
             }
         }
         else {
-            sayError("messagesProcess() $date not valid\n");
+            sayError("messagesProcess() $date not valid");
         }
 
         my $string = $client->message_string($msgId)
@@ -160,13 +160,13 @@ sub messagesProcess {
         $client->move( $targetFolder, $msgId )
             or die sayError("Could not move: $@");
         $client->Uid($oldUid);
-        sayInfo("messagesProcess() The email has been deleted\n");
+        sayInfo("messagesProcess() The email has been moved.");
         $spamCounter++;
         $boxSpamCounter++;
     }
     $client->expunge();
-    sayInfo(" - $boxSpamCounter message(s) were reported\n");
-    sayInfo(" - $boxSpamIgnoredCounter message(s) were ignored\n");
+    sayInfo(" - $boxSpamCounter message(s) were reported");
+    sayInfo(" - $boxSpamIgnoredCounter message(s) were ignored");
 }
 
 sub spamcopLogin {
@@ -284,7 +284,7 @@ sub openBox {
 
 sub closeBox {
     if ( defined $client and $client->IsAuthenticated() ) {
-        sayInfo("(*) logout\n");
+        sayInfo("(*) logout");
         $client->logout();
         undef($client);
     }
@@ -292,7 +292,7 @@ sub closeBox {
 
 sub init {
     getOptions();
-    print STDOUT 'imap2signal-spam.pl $Revision$' . "\n"
+    print STDOUT '$Script $Revision$' . "\n"
         if $isVerbose;
     readConfig();
     if ( defined $sysLog_ref ) {
@@ -504,7 +504,7 @@ sub getOptions {
 sub HELP_MESSAGE {
     print <<ENDTXT;
 Usage: 
- imap2signal-spam.pl [-i -d -v -b boxId -t] 
+ $Script [-i -d -v -b boxId -t] 
   -v verbose mode
   -d debug mode
   -b boxId
