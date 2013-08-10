@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2013-08-09
+# @date 2013-08-10
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2013 TLK Games all rights reserved
@@ -151,6 +151,7 @@ sub messagesProcess {
 
         my $string = $client->message_string($msgId)
             or die sayError("Could not message_string: $@");
+
         # Message is larger than maximum size, 50000 bytes.  Truncate it.
         $string = substr( $string, 0, 49999 );
         next if $isTest;
@@ -193,12 +194,12 @@ sub spamcomProcess {
     my ($spam) = @_;
 
     my $form = $mech->form_number(2);
-    if (! defined $form ) {
+    if ( !defined $form ) {
         die sayError("WWW::Mechanize::form_number(2) was failed");
     }
-    sayDebug('Form action: ' . $form->action() );
     $mech->field( 'spam', $spam );
     sayDebug('Click on "Process Spam" button');
+    sayDebug( 'Form action: ' . $form->action() );
     my $response = $mech->click();
     die sayError("WWW::Mechanize::click() was failed") if !defined $response;
     if ( !$response->is_success() ) {
@@ -207,16 +208,36 @@ sub spamcomProcess {
     }
 
     $form = $mech->form_number(2);
-    if (! defined $form ) {
+    if ( !defined $form ) {
         die sayError("WWW::Mechanize::form_number(2) was failed");
     }
     sayDebug('Click on "Send Spam Report(s) Now"');
+    sayDebug( 'Form action: ' . $form->action() );
     $response = $mech->click();
     die sayError("WWW::Mechanize::click() was failed") if !defined $response;
     if ( !$response->is_success() ) {
         my $message = $response->status_line();
         die sayError($message);
     }
+    my $content = $response->content();
+
+    if ( $content =~ m{^(Welcome,\s.*\.\s+You\shave\s.*\savailable\.)$}xms ) {
+        my $welcome = $1;
+        $welcome =~ s{\s{2,}}{ }g;
+        sayInfo($welcome);
+    }
+    if ($content =~ m{(Your\s<a\s[^>]+>\n
+                  average\sreporting\stime</a>\s
+                  is:\s+.*;\nGreat!\n)}xms
+        )
+    {
+        my $average = $1;
+        $average =~ s{\n}{ }g;
+        $average =~ s{</?a[^>]*>}{}g;
+        $average =~ s{\s{2,}}{ }g;
+        sayInfo($average);
+    }
+
 }
 
 sub openBox {
