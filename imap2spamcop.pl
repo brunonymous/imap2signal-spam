@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2013-08-10
+# @date 2013-08-16
 # http://code.google.com/p/imap2signal-spam/
 #
 # copyright (c) 2013 TLK Games all rights reserved
@@ -46,6 +46,7 @@ my $lastError          = '';
 my $ignoreDelay        = 0;
 my $spamCounter        = 0;
 my $spamIgnoredCounter = 0;
+my $spamTooOldCounter  = 0;
 my $sysLog_ref;
 my %mailboxes = ();
 my %accounts  = ();
@@ -105,6 +106,7 @@ sub run {
     }
     sayInfo("(*) total number of message(s) reported: $spamCounter");
     sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter");
+    sayInfo("(*) total number of message(s) too old: $spamTooOldCounter");
 }
 
 sub messagesProcess {
@@ -162,7 +164,6 @@ sub messagesProcess {
             or die sayError("Could not move: $@");
         $client->Uid($oldUid);
         sayInfo("messagesProcess() The email has been moved.");
-        $spamCounter++;
         $boxSpamCounter++;
     }
     $client->expunge();
@@ -192,6 +193,7 @@ sub spamcopLogin {
 
 sub spamcomProcess {
     my ($spam) = @_;
+    my $timestart = time;
 
     my $form = $mech->form_number(2);
     if ( !defined $form ) {
@@ -206,6 +208,20 @@ sub spamcomProcess {
         my $message = $response->status_line();
         die sayError($message);
     }
+    my $content = $response->content();
+
+    if ($content =~ m{<div\ class="error">(Sorry,\ this\ email\ is\ too
+                 \ old\ to\ file\ a\ spam\ report\.\ \ You\ must
+                 \ report\ spam\ within\ 2\ days\ of\ receipt\.
+                 \ \ This\ mail\ was\ received\ on[^<]+)</div>}xms
+        )
+    {
+        my $error = $1;
+        $error =~ s{\s{2,}}{ }g;
+        sayError($error);
+        $spamTooOldCounter++;
+        return;
+    }
 
     $form = $mech->form_number(2);
     if ( !defined $form ) {
@@ -219,7 +235,7 @@ sub spamcomProcess {
         my $message = $response->status_line();
         die sayError($message);
     }
-    my $content = $response->content();
+    $content = $response->content();
 
     if ( $content =~ m{^(Welcome,\s.*\.\s+You\shave\s.*\savailable\.)$}xms ) {
         my $welcome = $1;
@@ -237,6 +253,8 @@ sub spamcomProcess {
         $average =~ s{\s{2,}}{ }g;
         sayInfo($average);
     }
+    $spamCounter++;
+    sayInfo( 'Processing time spam: ' . ( time - $timestart ) . ' seconds' );
 
 }
 

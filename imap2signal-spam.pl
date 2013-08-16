@@ -161,7 +161,7 @@ sub messagesProcess {
         };
         if ( defined $mailTime ) {
             my $delta = time - $mailTime;
-            if ( $delta < $delay ) {
+            if ( $delay > 0 and $delta < $delay ) {
                 sayInfo(  "messagesProcess() The email is ignored for "
                         . "the moment: $delta < $delay\n" );
                 $spamIgnoredCounter++;
