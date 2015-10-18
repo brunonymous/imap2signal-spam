@@ -1,0 +1,1 @@
+A small perl script that reads folder of IMAP box(es) and post the spam messages to Signal Spam services
