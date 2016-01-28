@@ -1,11 +1,10 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2009-05-14
-# http://code.google.com/p/imap2signal-spam/
+# @date 2016-01-28
+# https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2008-2009 TLK Games all rights reserved
-# $Id$
+# copyright (c) 2008-2016 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -176,7 +175,7 @@ sub messagesProcess {
             or die "Could not message_string: $@\n";
 
         # FIXME try to remove the "*****SPAM*****" string ,
-        # but Mail::Intenet modify the original e-mail :-( 
+        # but Mail::Intenet modify the original e-mail :-(
         if ( defined $subjectRegex ) {
             my @arrayMail = split( /\n/, $string );
             my $email = Mail::Internet->new( \@arrayMail );

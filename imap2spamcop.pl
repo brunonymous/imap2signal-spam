@@ -1,11 +1,10 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2013-08-16
-# http://code.google.com/p/imap2signal-spam/
+# @date 2015-01-28
+# https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2013 TLK Games all rights reserved
-# $Id$
+# copyright (c) 2013-2015 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -223,8 +222,31 @@ sub spamcomProcess {
         return;
     }
 
+WAITREFRESH:
+    while (1) {
+        if ($content =~ m{\(or\ click\ reload\ if\ this\ page
+                        \ does\ not\ refresh\ automatically\ in\s+
+                        .(\d+)\ seconds\.\)}xs
+            )
+        {
+            my $seconds = $1;
+            my $uri     = $mech->uri();
+            sayDebug("You must wait $seconds seconds.");
+            sleep $seconds;
+            $response = $mech->get($uri);
+            if ( !$response->is_success() ) {
+                my $message = $response->status_line();
+                die sayError($message);
+            }
+            $content = $response->content();
+        }
+        else {
+            last WAITREFRESH;
+        }
+    }
     $form = $mech->form_number(2);
     if ( !defined $form ) {
+        sayDebug($content);
         die sayError("WWW::Mechanize::form_number(2) was failed");
     }
     sayDebug('Click on "Send Spam Report(s) Now"');
