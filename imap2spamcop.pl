@@ -1,10 +1,10 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2015-01-28
+# @date 2016-02-28
 # https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2013-2015 TLK Games all rights reserved
+# copyright (c) 2013-2016 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -153,10 +153,14 @@ sub messagesProcess {
         my $string = $client->message_string($msgId)
             or die sayError("Could not message_string: $@");
 
-        # Message is larger than maximum size, 50000 bytes.  Truncate it.
+        # Message is larger than maximum size, 50,000 bytes.  Truncate it.
         $string = substr( $string, 0, 49999 );
         next if $isTest;
-        spamcomProcess($string);
+        eval { spamcomProcess($string); };
+        if ($@) {
+            sayError($@);
+            next;
+        }
         my $oldUid = $client->Uid();
         $client->Uid(1);
         $client->move( $targetFolder, $msgId )
@@ -192,10 +196,24 @@ sub spamcopLogin {
 
 sub spamcomProcess {
     my ($spam) = @_;
+    sayDebug( 'Size of spam: ' . length($spam) . ' bytes.' );
     my $timestart = time;
 
     my $form = $mech->form_number(2);
     if ( !defined $form ) {
+        my $res     = $mech->response();
+        my $content = $res->content();
+        if ( $content =~ m{<strong>(No data / Too much data)</strong>} ) {
+            my $error = $1;
+            if ($content =~ m {(SpamCop\ will\ no\ longer\ accept\ email\ 
+                           larger\ than)\s*
+                           .(50\.0K\ bytes)}xms
+                )
+            {
+                sayError( $1 . ' ' . $2 );
+            }
+            die sayError($error);
+        }
         die sayError("WWW::Mechanize::form_number(2) was failed");
     }
     $mech->field( 'spam', $spam );
