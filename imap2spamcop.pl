@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2016-02-28
+# @date 2016-02-29
 # https://github.com/brunonymous/imap2signal-spam
 #
 # copyright (c) 2013-2016 TLK Games all rights reserved
@@ -201,19 +201,6 @@ sub spamcomProcess {
 
     my $form = $mech->form_number(2);
     if ( !defined $form ) {
-        my $res     = $mech->response();
-        my $content = $res->content();
-        if ( $content =~ m{<strong>(No data / Too much data)</strong>} ) {
-            my $error = $1;
-            if ($content =~ m {(SpamCop\ will\ no\ longer\ accept\ email\ 
-                           larger\ than)\s*
-                           .(50\.0K\ bytes)}xms
-                )
-            {
-                sayError( $1 . ' ' . $2 );
-            }
-            die sayError($error);
-        }
         die sayError("WWW::Mechanize::form_number(2) was failed");
     }
     $mech->field( 'spam', $spam );
@@ -226,19 +213,7 @@ sub spamcomProcess {
         die sayError($message);
     }
     my $content = $response->content();
-
-    if ($content =~ m{<div\ class="error">(Sorry,\ this\ email\ is\ too
-                 \ old\ to\ file\ a\ spam\ report\.\ \ You\ must
-                 \ report\ spam\ within\ 2\ days\ of\ receipt\.
-                 \ \ This\ mail\ was\ received\ on[^<]+)</div>}xms
-        )
-    {
-        my $error = $1;
-        $error =~ s{\s{2,}}{ }g;
-        sayError($error);
-        $spamTooOldCounter++;
-        return;
-    }
+    return if isEmailTooOld($content);
 
 WAITREFRESH:
     while (1) {
@@ -262,6 +237,8 @@ WAITREFRESH:
             last WAITREFRESH;
         }
     }
+    return if isEmailTooOld($content);
+
     $form = $mech->form_number(2);
     if ( !defined $form ) {
         sayDebug($content);
@@ -296,6 +273,23 @@ WAITREFRESH:
     $spamCounter++;
     sayInfo( 'Processing time spam: ' . ( time - $timestart ) . ' seconds' );
 
+}
+
+sub isEmailTooOld {
+    my ($content) = @_;
+    if ($content =~ m{<div\ class="error">(Sorry,\ this\ email\ is\ too
+        \ old\ to\ file\ a\ spam\ report\.\ \ You\ must
+        \ report\ spam\ within\ 2\ days\ of\ receipt\.
+        \ \ This\ mail\ was\ received\ on[^<]+)</div>}xms
+        )
+    {
+        my $error = $1;
+        $error =~ s{\s{2,}}{ }g;
+        sayError($error);
+        $spamTooOldCounter++;
+        return 1;
+    }
+    return 0;
 }
 
 sub openBox {
