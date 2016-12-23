@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2016-02-29
+# @date 2016-12-23
 # https://github.com/brunonymous/imap2signal-spam
 #
 # copyright (c) 2013-2016 TLK Games all rights reserved
@@ -37,6 +37,7 @@ use Sys::Syslog;
 use Time::Local 'timelocal';
 use WWW::Mechanize;
 use HTTP::Cookies;
+use Carp;
 my $agent_ref;
 my $isVerbose          = 0;
 my $isDebug            = 0;
@@ -55,15 +56,18 @@ my $defaultAccount;
 my $client;
 my $mech;
 
-eval {
-    init();
-    run();
-};
-if ($@) {
-    sayError($lastError);
-    sayError("(!) $Script was failed!");
-    die $lastError;
-}
+init();
+run();
+
+#eval {
+#    init();
+#    run();
+#};
+#if ($@) {
+#    sayError($lastError);
+#    sayError("(!) $Script was failed!");
+#    confess $lastError;
+#}
 
 sub END {
     closeBox();
@@ -78,6 +82,7 @@ sub run {
             sayInfo("(*) '$id' box is disabled");
             next;
         }
+        sayInfo('------------------------------------------------------');
         sayInfo("(*) process '$id' box");
         my $account
             = exists $mailbox_ref->{'spamcop-account'}
@@ -118,6 +123,7 @@ sub messagesProcess {
     my $count                 = 0;
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
+MESSAGESLOOP:
     foreach my $msgId (@messages) {
         sayDebug("- messagesProcess() flag($msgId)");
 
@@ -156,11 +162,26 @@ sub messagesProcess {
         # Message is larger than maximum size, 50,000 bytes.  Truncate it.
         $string = substr( $string, 0, 49999 );
         next if $isTest;
-        eval { spamcomProcess($string); };
-        if ($@) {
-            sayError($@);
-            next;
+        my $tryCount = 3;
+        my $res      = '';
+    SPAMCOPTRY:
+        while ( $tryCount > 1 ) {
+            sayDebug("Try $tryCount");
+            eval { $res = spamcomProcess($string); };
+            if ($@) {
+                sayError($@);
+                next MESSAGESLOOP;
+            }
+            if ( $res eq 'No data / Too much data' ) {
+                spamcopLogout($account_ref);
+                spamcopLogin($account_ref);
+                $tryCount--;
+            }
+            else {
+                last SPAMCOPTRY;
+            }
         }
+        die $res if $tryCount == 0;
         my $oldUid = $client->Uid();
         $client->Uid(1);
         $client->move( $targetFolder, $msgId )
@@ -172,6 +193,7 @@ sub messagesProcess {
     $client->expunge();
     sayInfo(" - $boxSpamCounter message(s) were reported");
     sayInfo(" - $boxSpamIgnoredCounter message(s) were ignored");
+    spamcopLogout($account_ref);
 }
 
 sub spamcopLogin {
@@ -192,6 +214,46 @@ sub spamcopLogin {
         my $message = $response->status_line();
         die sayError($message);
     }
+    my $content = $response->content();
+    if ($isDebug) {
+        if ($content =~ m{</div><div\ id="login">[\r\n]
+        <form\ method="post"\ action="https://www\.spamcop\.net/sc">[\r\n]
+        <div>[\r\n]
+        (.*)[\r\n]
+        &nbsp;.*$}xs
+            )
+        {
+            my $name = $1;
+            sayDebug("Welcome $name!");
+        }
+        else {
+            print $content;
+            sayError("Display name was not found!");
+        }
+    }
+    sayDebug( 'The authentication of the '
+            . $account_ref->{'username'}
+            . ' user was successful!' );
+}
+
+sub spamcopLogout {
+    my ($account_ref) = @_;
+    my $form = $mech->form_number(1);
+    if ( !defined $form ) {
+        my $str = $mech->content();
+        print STDERR $str;
+        die sayError("WWW::Mechanize::form_number(1) was failed");
+    }
+    my $response = $mech->click();
+    die sayError("WWW::Mechanize::click() was failed") if !defined $response;
+    if ( !$response->is_success() ) {
+        my $message = $response->status_line();
+        die sayError($message);
+    }
+    #my $content = $response->content();
+    sayDebug( 'The logout of the '
+            . $account_ref->{'username'}
+            . ' user was successful!' );
 }
 
 sub spamcomProcess {
@@ -201,7 +263,15 @@ sub spamcomProcess {
 
     my $form = $mech->form_number(2);
     if ( !defined $form ) {
-        die sayError("WWW::Mechanize::form_number(2) was failed");
+        my $str = $mech->content();
+        if ( $str =~ m{<strong>(No data / Too much data)</strong>} ) {
+            my $err = $1;
+            sayError($err);
+            return $err;
+        }
+        else {
+            die sayError("WWW::Mechanize::form_number(2) was failed");
+        }
     }
     $mech->field( 'spam', $spam );
     sayDebug('Click on "Process Spam" button');
@@ -237,7 +307,7 @@ WAITREFRESH:
             last WAITREFRESH;
         }
     }
-    return if isEmailTooOld($content);
+    return '' if isEmailTooOld($content);
 
     $form = $mech->form_number(2);
     if ( !defined $form ) {
@@ -272,7 +342,7 @@ WAITREFRESH:
     }
     $spamCounter++;
     sayInfo( 'Processing time spam: ' . ( time - $timestart ) . ' seconds' );
-
+    return '';
 }
 
 sub isEmailTooOld {
@@ -505,7 +575,7 @@ sub putMailbox {
         if !exists $mailbox_ref->{'id'};
     my $id = $mailbox_ref->{'id'};
     delete $mailbox_ref->{'id'};
-    die sayError("(!)putMailbox() duplicate mailbox '$id' id")
+    confess sayError("(!)putMailbox() duplicate mailbox '$id' id")
         if exists $mailboxes{$id};
     $mailboxes{$id} = $mailbox_ref;
     $mailbox_ref->{'enabled'} = 1
