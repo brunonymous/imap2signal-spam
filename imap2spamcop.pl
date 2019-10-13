@@ -1,10 +1,10 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2016-12-23
+# @date 2019-11-19
 # https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2013-2016 TLK Games all rights reserved
+# copyright (c) 2013-2019 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -38,6 +38,9 @@ use Time::Local 'timelocal';
 use WWW::Mechanize;
 use HTTP::Cookies;
 use Carp;
+$Getopt::Std::STANDARD_HELP_VERSION = 1;
+use vars qw($VERSION);
+$VERSION = '1.0.1';
 my $agent_ref;
 my $isVerbose          = 0;
 my $isDebug            = 0;
@@ -137,7 +140,7 @@ MESSAGESLOOP:
         my $subject = $hashref->{'Subject'}->[0];
         my $date    = $client->internaldate($msgId)
             or die sayError("Could not internaldate: $@");
-        sayInfo( sprintf( "%04d", $count ) . "$date / $subject" );
+        sayInfo( sprintf( "%04d", $count ) . ") $date / $subject" );
 
         #next;
         my $mailTime = str2time($date);
@@ -250,6 +253,7 @@ sub spamcopLogout {
         my $message = $response->status_line();
         die sayError($message);
     }
+
     #my $content = $response->content();
     sayDebug( 'The logout of the '
             . $account_ref->{'username'}
@@ -288,8 +292,8 @@ sub spamcomProcess {
 WAITREFRESH:
     while (1) {
         if ($content =~ m{\(or\ click\ reload\ if\ this\ page
-                        \ does\ not\ refresh\ automatically\ in\s+
-                        .(\d+)\ seconds\.\)}xs
+                        \ does\ not\ refresh\ automatically\ in\s*
+                        (\d+)\ seconds\.\)}xs
             )
         {
             my $seconds = $1;
@@ -348,9 +352,9 @@ WAITREFRESH:
 sub isEmailTooOld {
     my ($content) = @_;
     if ($content =~ m{<div\ class="error">(Sorry,\ this\ email\ is\ too
-        \ old\ to\ file\ a\ spam\ report\.\ \ You\ must
-        \ report\ spam\ within\ 2\ days\ of\ receipt\.
-        \ \ This\ mail\ was\ received\ on[^<]+)</div>}xms
+        \ old\ to\ file\ a\ spam\ report\.\ You\ must
+        \ report\ spam\ within\ 2\ days\ of\ receipt\.  
+        \ This\ mail\ was\ received\ on[^<]+)</div>}xms
         )
     {
         my $error = $1;
@@ -440,8 +444,6 @@ sub closeBox {
 
 sub init {
     getOptions();
-    print STDOUT '$Script $Revision$' . "\n"
-        if $isVerbose;
     readConfig();
     if ( defined $sysLog_ref ) {
         Sys::Syslog::setlogsock( $sysLog_ref->{'sock_type'} );
@@ -661,4 +663,13 @@ Usage:
 ENDTXT
     exit 0;
 }
+
+sub VERSION_MESSAGE {
+    print STDOUT <<ENDTXT;
+    $Script $VERSION (2019-11-19)
+    Copyright (C) 2013-2019 TLK Games 
+    Written by Bruno Ethvignot.
+ENDTXT
+}
+
 
