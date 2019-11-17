@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2019-11-19
+# @date 2019-11-17
 # https://github.com/brunonymous/imap2signal-spam
 #
 # copyright (c) 2013-2019 TLK Games all rights reserved
@@ -40,7 +40,7 @@ use HTTP::Cookies;
 use Carp;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 use vars qw($VERSION);
-$VERSION = '1.0.1';
+$VERSION = '1.0.2';
 my $agent_ref;
 my $isVerbose          = 0;
 my $isDebug            = 0;
@@ -287,7 +287,7 @@ sub spamcomProcess {
         die sayError($message);
     }
     my $content = $response->content();
-    return if isEmailTooOld($content);
+    return '' if isEmailTooOld($content);
 
 WAITREFRESH:
     while (1) {
