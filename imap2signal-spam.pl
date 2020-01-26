@@ -1,10 +1,10 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2016-01-28
+# @date 2020-01-26
 # https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2008-2016 TLK Games all rights reserved
+# copyright (c) 2008-2020 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,22 +22,30 @@
 # MA  02110-1301, USA.
 #
 use strict;
-use LWP::UserAgent;
-use Mail::IMAPClient;
-use IO::Socket::SSL;
-use MIME::Base64;
-use Data::Dumper;
-use List::Util qw( first );
+use warnings;
+use utf8;
+use Carp;
 use Config::General;
+use Data::Dumper;
+use FindBin qw( $Bin $Script );
 use Getopt::Std;
-use Time::Local 'timelocal';
-use Sys::Syslog;
+use HTTP::Cookies;
+use IO::Socket::SSL;
+use List::Util qw( first );
+use Mail::IMAPClient;
 use Mail::Internet;
+use MIME::Base64;
+use Sys::Syslog;
+use Time::Local 'timelocal';
+use WWW::Mechanize;
+use vars qw($VERSION);
+$VERSION                            = '1.5.0';
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
-my $agent_ref;
+my %userAgent = ();
 my %mailboxes = ();
 my $signalSpamURL;
+my $signalSpamLoginURL;
 my %accounts = ();
 my $sysLog_ref;
 my $defaultAccount;
@@ -47,8 +55,10 @@ my $isDebug        = 0;
 my $isTest         = 0;
 my $ignoreDelay    = 0;
 my $boxIdFilter;
+my $mech;
 my $client;
-my $user_agent;
+my $cookie_jar;
+
 my %month = (
     'Jan' => 1,
     'Feb' => 2,
@@ -76,13 +86,15 @@ if ($@) {
     die $@;
 }
 
-## @method void END()
+#** @function END()
+#*
 sub END {
     closeBox();
     Sys::Syslog::closelog();
 }
 
-## @method void run()
+#** @function public run()
+#*
 sub run {
     foreach my $id ( keys %mailboxes ) {
         next if defined $boxIdFilter and $boxIdFilter ne $id;
@@ -103,8 +115,12 @@ sub run {
         }
         eval {
             openBox($mailbox_ref);
-            messagesProcess( $accounts{$account}, $mailbox_ref->{'delay'},
-                $subjectRegex );
+            messagesProcess(
+                $accounts{$account},
+                $mailbox_ref->{'delay'},
+                $mailbox_ref->{'target-folder'},
+                $subjectRegex
+            );
         };
         if ($@) {
             sayError($@);
@@ -115,24 +131,31 @@ sub run {
     sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter\n");
 }
 
-## @method messagesProcess($account_ref)
-# @param $account_ref
+#** @function public messagesProcess($account_ref)
+# @param account_ref - required hashref
+#*
 sub messagesProcess {
-    my ( $account_ref, $delay, $subjectRegex ) = @_;
-    my @messages = $client->messages();
+    my ( $account_ref, $delay, $targetFolder, $subjectRegex ) = @_;
+    signalSpamLogin($account_ref);
+    my @messages      = $client->messages();
+    my $totalMessages = scalar(@messages);
     sayInfo(
-        "- messagesProcess() " . scalar(@messages) . " message(s) found\n" );
+        "- messagesProcess() " . $totalMessages . " message(s) found\n" );
     my $count                 = 0;
     my $boxSpamCounter        = 0;
     my $boxSpamIgnoredCounter = 0;
+
     foreach my $msgId (@messages) {
+        sayDebug('======================================');
         sayDebug("- messagesProcess() flag($msgId)\n");
 
         my @flagHash = $client->flags($msgId);
         next if first { $_ eq '\\Deleted' } @flagHash;
         $count++;
 
-        sayDebug("- messagesProcess() parse_headers($msgId)\n");
+        sayDebug( $count . '/'
+                . $totalMessages
+                . ") messagesProcess() parse_headers($msgId)\n" );
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
@@ -178,7 +201,7 @@ sub messagesProcess {
         # but Mail::Intenet modify the original e-mail :-(
         if ( defined $subjectRegex ) {
             my @arrayMail = split( /\n/, $string );
-            my $email = Mail::Internet->new( \@arrayMail );
+            my $email     = Mail::Internet->new( \@arrayMail );
             $subject = $email->get('Subject');
             $subject =~ s{(\n|\r)}{}g;
             $subject =~ s{$subjectRegex}{$1};
@@ -189,37 +212,163 @@ sub messagesProcess {
 
         #"print $string;
         next if $isTest;
-        post( $string, $account_ref );
-        $client->delete_message($msgId)
-            or die "Could not delete_message: $@\n";
-        sayInfo("messagesProcess() The email has been deleted\n");
+        next if !signalSpamReporting( $string, $account_ref );
+        if ( defined $targetFolder and length($targetFolder) > 0 ) {
+            croak sayError( 'Could not move: ' . $@ )
+                if !$client->move( $targetFolder, $msgId );
+            sayInfo('The email has been moved.');
+        }
+        else {
+            croak sayError( 'Could not delete_message: ' . $@ )
+                if !$client->delete_message($msgId);
+            sayInfo("messagesProcess() The email has been deleted\n");
+        }
         $spamCounter++;
         $boxSpamCounter++;
     }
     sayInfo(" - $boxSpamCounter message(s) were reported\n");
     sayInfo(" - $boxSpamIgnoredCounter message(s) were ignored\n");
+
 }
 
-## @method void post($msg, account_ref)
-# @param $msg
-# @param $account_ref
-sub post {
+#** @function public signalSpamReporting($msg, account_ref)
+# @brief Posts the spam in the Signal Spam form
+# @param msg - required string
+# @param account_ref - required hashref
+#*
+sub signalSpamReporting {
     my ( $msg, $account_ref ) = @_;
 
-    $msg = 'message=' . encode_base64($msg);
-    my $req = HTTP::Request->new( 'POST' => $account_ref->{'url'} );
-    die "'Can't create HTTP::Request object!" if !defined $req;
-    $req->content_type('application/x-www-form-urlencoded');
-    $req->authorization_basic( $account_ref->{'username'},
-        $account_ref->{'password'} );
-    $req->content($msg);
-    my $response = $user_agent->request($req);
+    # Return a HTTP::Response object
+    my $response = mechanizeGet( $account_ref->{'url'} );
+    my $form     = $mech->form_number(1);
+    die sayError('WWW::Mechanize::form_number(1) was failed')
+        if !defined $form;
+    $mech->field( 'reporting[raw_email]', $msg );
+    $response = mechanizeClick();
+
+    #Votre signalement a été enregistré
+    my $content = $response->decoded_content();
+    if ( $content
+        !~ m{^.*<p>Votre\ signalement\ a\ été\ enregistré</p>.*$}xms )
+    {
+        writeFile( 'signal-spam-response.txt', $content );
+        sayError('Spam doesn\'t seem to have been accepted.');
+        return 0;
+    }
+
+    #sayInfo("Your spam report has been recorded.");
+    sayInfo(  'The email was submitted with the "'
+            . $account_ref->{'username'}
+            . ' account.' );
+    return 1;
+}
+
+#** function public signalSpamLogin($account_ref)
+# @brief Authentifcates th user on the https://signalants.signal-spam.fr website
+# @param account_ref - required hashref
+#*
+sub signalSpamLogin {
+    my ($account_ref) = @_;
+    my $content;
+
+    # Return a HTTP::Response object
+    my $response = mechanizeGet( $account_ref->{'login-url'} );
+    $content = $response->decoded_content();
+
+    # Get HTML::Form object
+    my $form = $mech->form_number(1);
+    croak sayError('WWW::Mechanize::form_number(1) was failed')
+        if !defined $form;
+    $mech->field( 'user[email_or_login]', $account_ref->{'username'} );
+    $mech->field( 'user[password]',       $account_ref->{'password'} );
+    $mech->field( 'user[remember_me]',    0 );
+    $response = mechanizeClick();
+    $content  = $response->decoded_content();
+
+    if ( $content
+        =~ m{Nom\ d&#39;utilisateur\ ou\ mot\ de\ passe\ incorrect\.}xms )
+    {
+        die sayError('Incorrect username or password');
+
+    }
+    sayDebug( 'The authentication of the '
+            . $account_ref->{'username'}
+            . ' user was successful!' );
+}
+
+sub signalSpamLogout {
+    my ($account_ref) = @_;
+    my $form = $mech->form_number(1);
+    if ( !defined $form ) {
+        my $str = $mech->content();
+        print STDERR $str;
+        die sayError("WWW::Mechanize::form_number(1) was failed");
+    }
+    my $response = $mech->click();
+    die sayError("WWW::Mechanize::click() was failed") if !defined $response;
     if ( !$response->is_success() ) {
         my $message = $response->status_line();
-        die $message;
+        die sayError($message);
     }
-    sayInfo(  "post() the email was submitted with the"
-            . " '$account_ref->{'username'}' account\n" );
+
+    #my $content = $response->content();
+    sayDebug( 'The logout of the '
+            . $account_ref->{'username'}
+            . ' user was successful!' );
+}
+
+#** @function public mechanizeGet ($url)
+# @brief Given a URL, fetches it.
+# @param url - required string (URL)
+# @retval response - HTTP::Response object
+#*
+sub mechanizeGet {
+    my ($url) = @_;
+    sayDebug( 'WWW::Mechanize:get(' . $url . ')' );
+
+    # Return a HTTP::Response object
+    my $response = $mech->get($url);
+    croak sayError("WWW::Mechanize:get($url) was failed")
+        if !defined $response;
+    if ( !$response->is_success() ) {
+        my $message = $response->status_line();
+        croak sayError($message);
+    }
+    my $request = $response->request();
+    my $referer = $request->header('Referer');
+    sayDebug( 'Referer: ' . $referer ) if defined $referer;
+    my $title = $mech->title();
+    $title =~ s{[^a-zA-Z0-9 -]}{}g;
+    sayDebug( 'Page title: ' . $title );
+    return $response;
+}
+
+#** @function public mechanizeClick ()
+# @brief Has the effect of clicking a button on the current form
+# @retval response - HTTP::Response object
+#*
+sub mechanizeClick {
+    sayDebug('WWW::Mechanize::clic()');
+    my $response = $mech->click();
+    croak sayError("WWW::Mechanize:click was failed") if !defined $response;
+    if ( !$response->is_success() ) {
+        my $message = $response->status_line();
+        croak sayError($message);
+    }
+    my $title = $mech->title();
+    $title =~ s{[^a-zA-Z0-9 -]}{}g;
+    sayDebug( 'Page title: ' . $title );
+    return $response;
+}
+
+sub displayCookie {
+    my ($response) = @_;
+    my $host       = $response->request()->{_uri_canonical}->host();
+    my $cookie_ref = $cookie_jar->get_cookies($host);
+    foreach my $name ( keys %$cookie_ref ) {
+        sayDebug( $name . ': ' . $cookie_ref->{$name} );
+    }
 }
 
 ## @method void openBox($mailbox_ref)
@@ -297,10 +446,12 @@ sub closeBox {
     }
 }
 
-## @method void init()
+#** function public init()
+# @brief Perfom some initializations
+#*
 sub init {
     getOptions();
-    print STDOUT 'imap2signal-spam.pl $Revision$' . "\n"
+    print STDOUT 'imap2signal-spam.pl ' . $VERSION . "\n"
         if $isVerbose;
     readConfig();
     if ( defined $sysLog_ref ) {
@@ -313,13 +464,22 @@ sub init {
             $sysLog_ref->{'facility'}
         );
     }
-    $user_agent = LWP::UserAgent->new(
-        'agent'   => $agent_ref->{'agent'},
-        'timeout' => $agent_ref->{'timeout'}
+    $cookie_jar = HTTP::Cookies->new(
+        'file'           => $ENV{'HOME'} . '/.' . $Script . '.cookie',
+        'autosave'       => 0,
+        'ignore_discard' => 0
     );
+
+    $mech = WWW::Mechanize->new(
+        'agent'      => $userAgent{'agent'},
+        'cookie_jar' => $cookie_jar
+    );
+
 }
 
-## @method void readConfig()
+#** @function public readConfig ()
+# @brief Reads ans parses the "imap2signal-spam.conf" file
+#*
 sub readConfig {
     my $confFound = 0;
     foreach my $pathname ( '.', '/etc', $ENV{'HOME'} . '/.imap2signal-spam' )
@@ -329,36 +489,144 @@ sub readConfig {
         $confFound = 1;
         my %config = Config::General->new($filename)->getall();
 
-        readAgentSection( $config{'user-agent'} )
-            if exists $config{'user-agent'};
+        # Reads "user-agent" section
+        my $ua_ref = isHash( \%config, 'user-agent' );
+        $userAgent{'agent'}   = isString( $ua_ref, 'agent' );
+        $userAgent{'timeout'} = isInteger( $ua_ref, 'timeout' );
 
-        # read signal spam account(s)
-        readSignalSection( $config{'signal-spam'} )
-            if exists $config{'signal-spam'};
+        # Reads "signal-spams" section
+        my $signal_ref = isHash( \%config, 'signal-spam' );
+        $signalSpamURL      = isString( $signal_ref, 'url' );
+        $signalSpamLoginURL = isString( $signal_ref, 'login-url' );
+        my $accounts_ref = isArrayOfHash( $signal_ref, 'account' );
+        foreach my $account_ref (@$accounts_ref) {
+            readAccountSections($account_ref);
+        }
 
-        # read IMAP box(es)
-        readMailboxSections( $config{'mailbox'} )
-            if exists $config{'mailbox'};
-
+        # Reads IMAP box(es)
+        my $mailboxes_ref = isArrayOfHash( \%config, 'mailbox' );
+        foreach my $mailbox_ref ( @{$mailboxes_ref} ) {
+            readMailboxSection($mailbox_ref);
+        }
         if ( exists $config{'syslog'} ) {
-            $sysLog_ref = $config{'syslog'};
-            die "(!) readConfig(): 'logopt' not found"
-                if !exists $sysLog_ref->{'logopt'};
-            die "(!) readConfig(): 'facility' not found"
-                if !exists $sysLog_ref->{'facility'};
-            die "(!) readConfig(): 'sock_type' not found"
-                if !exists $sysLog_ref->{'sock_type'};
+            $sysLog_ref = isHash( \%config, 'syslog' );
+            isString( $sysLog_ref, 'logopt' );
+            isString( $sysLog_ref, 'facility' );
+            isString( $sysLog_ref, 'sock_type' );
         }
         $confFound = 1;
     }
     die "(!) readConfig(): no configuration file has been found!"
         if !$confFound;
     die "(!) readConfig(): 'user-agent' section not found! "
-        if !defined $agent_ref;
+        if scalar( keys %userAgent ) == 0;
     die "(!) readConfig(): 'signal-spam' entry not found! "
         if scalar( keys %accounts ) == 0;
     die "(!) readConfig(): 'mailbox' entry not found! "
         if scalar( keys %mailboxes ) == 0;
+}
+
+#** @function public isString( $hash_ref, $key, $default )
+# @brief Returns the value of key, if it exists
+# @param hash_ref - required hashref (hash with key-value pairs)
+# @param key - required string (Name of the key)
+# @param default - optional string (Value returned if the key does not exists)
+# @retval value - string (Value of the key)
+#*
+sub isString {
+    my ( $hash_ref, $key, $default ) = @_;
+    return $default if !exists $hash_ref->{$key} and defined $default;
+    croak sayError("'$key' string not found or wrong")
+        if !exists( $hash_ref->{$key} )
+        or ref( $hash_ref->{$key} )
+        or $hash_ref->{$key} !~ m{^.+$}m;
+    return $hash_ref->{$key};
+}
+
+#** @function public isInteger( $hash_ref, $key )
+# @brief Returns the integer value of key, if it exists
+# @param hash_ref - required hashref (hash with key-value pairs)
+# @param key - required string (Name of the key)
+# @param default - optional integer (Value returned if the key does not exists)
+# @retval value - integer (Value of the key)
+#*
+sub isInteger {
+    my ( $hash_ref, $key, $default ) = @_;
+    return $default if !exists $hash_ref->{$key} and defined $default;
+    croak sayError("'$key' integer not found or wrong")
+        if !exists( $hash_ref->{$key} )
+        or ref( $hash_ref->{$key} )
+        or $hash_ref->{$key} !~ m{^-?\d+$};
+    return $hash_ref->{$key};
+}
+
+#** @function public isBool( $hash_ref, $key )
+# @brief Returns the boolean value of key, if it exists
+# @param hash_ref - required hashref (hash with key-value pairs)
+# @param key - required string (Name of the key)
+# @retval value - boolean (Bolean value of the key, either 0 or 1)
+#*
+sub isBool {
+    my ( $hash_ref, $key ) = @_;
+    croak sayError("'$key' boolean not found or wrong")
+        if !exists( $hash_ref->{$key} )
+        or ref( $hash_ref->{$key} )
+        or $hash_ref->{$key} !~ m{^(0|1|true|false)$};
+    if ( $hash_ref->{$key} eq 'false' ) {
+        $hash_ref->{$key} = 0;
+    }
+    elsif ( $hash_ref->{$key} eq 'true' ) {
+        $hash_ref->{$key} = 1;
+    }
+    return $hash_ref->{$key};
+}
+
+#** @function public isHash( $hash_ref, $key )
+# @brief Returns the hashref of key, if it exists
+# @param hash_ref - required hashref (hash with key-value pairs)
+# @param key - required string (Name of the key)
+# @retval hash_ref - hashref (hashref of the key)
+#*
+sub isHash {
+    my ( $hash_ref, $key ) = @_;
+    croak sayError("'$key' hash not found or wrong")
+        if !exists( $hash_ref->{$key} )
+        or ref( $hash_ref->{$key} ) ne 'HASH';
+    return $hash_ref->{$key};
+}
+
+#** @function public isArrayOfHash( $hash_ref, $key )
+# @brief Returns the arrayref of key, if it exists
+# @param hash_ref - required hashref (hash with key-value pairs)
+# @param key - required string (Name of the key)
+# @retval array_ref - arrayref (arrayref of the key)
+#*
+sub isArrayOfHash {
+    my ( $hash_ref, $key ) = @_;
+    croak sayError("'$key' array not found or wrong")
+        if !exists $hash_ref->{$key};
+    my $value_ref = $hash_ref->{$key};
+    my $array_ref = [];
+    if ( ref($value_ref) eq 'HASH' ) {
+        $array_ref = [$value_ref];
+    }
+    elsif ( ref($value_ref) eq 'ARRAY' ) {
+        $array_ref = $value_ref;
+    }
+    else {
+        croak sayError("'$key' value is bad");
+    }
+    return $array_ref;
+}
+
+sub getId {
+    my ( $pack, $file, $line, $function );
+    ( $pack, $file, $line, $function ) = caller(2);
+    ( $pack, $file, $line ) = caller(1);
+    my $id = '';
+    $function = '?' if !defined $function;
+    $id       = "[$function; line: $line] ";
+    return $id;
 }
 
 ## @method void sayError($message)
@@ -366,9 +634,11 @@ sub readConfig {
 sub sayError {
     my ($message) = @_;
     $message =~ s{(\n|\r)}{}g;
+    $message = $message . ' ' . getId();
     setlog( 'info', $message );
     print STDERR $message . "\n"
         if $isVerbose;
+    return $message;
 }
 
 ## @method void sayInfo($message)
@@ -376,6 +646,7 @@ sub sayError {
 sub sayInfo {
     my ($message) = @_;
     $message =~ s{(\n|\r)}{}g;
+    $message = $message . ' ' . getId();
     setlog( 'info', $message );
     print STDOUT $message . "\n"
         if $isVerbose;
@@ -387,6 +658,7 @@ sub sayDebug {
     return if !$isDebug;
     my ($message) = @_;
     $message =~ s{(\n|\r)}{}g;
+    $message = $message . ' ' . getId();
     setlog( 'info', $message );
     print STDOUT $message . "\n"
         if $isVerbose;
@@ -400,114 +672,78 @@ sub setlog {
     Sys::Syslog::syslog( $priorite, '%s', $message );
 }
 
-## @method readAgentSecion($ua_ref)
-# @param ua_ref Anonymous hash
-sub readAgentSection {
-    my ($ua_ref) = @_;
-    die "(!) readAgentSecion(): agent string  not found! "
-        if !exists $ua_ref->{'agent'};
-    die "(!) readAgentSecion(): agent timeout not found! "
-        if !exists $ua_ref->{'timeout'};
-    die "(!) readAgentSecion(): bad format for agent timeout! "
-        if $ua_ref->{'timeout'} !~ m{^\d+$};
-    $agent_ref = $ua_ref;
-}
-
-## @method void readSignalSection($signal_ref)
-# Read Signal Spam account(s)
-sub readSignalSection {
-    my ($signal_ref) = @_;
-    die "(!) readSignalSection(): signal-spam URL not found! "
-        if !exists $signal_ref->{'url'};
-    $signalSpamURL = $signal_ref->{'url'};
-    die "(!) readSignalSection(): 'account' entry not found! "
-        if !exists $signal_ref->{'account'};
-    if ( ref( $signal_ref->{'account'} ) eq 'ARRAY' ) {
-        foreach my $account_ref ( @{ $signal_ref->{'account'} } ) {
-            putAccount($account_ref);
-        }
-    }
-    elsif ( ref( $signal_ref->{'account'} ) eq 'HASH' ) {
-        putAccount( $signal_ref->{'account'} );
-    }
-    else {
-        die "(!) readSignalSection bad statement"
-            . " of the 'signal-spam' section";
-    }
-}
-
-## @method void putAccount($account_ref)
-# @param $account_ref
-sub putAccount {
+#** @function public readAccountSections($account_ref)
+# @brief Reads an "account" section from configuration file
+# @param account_ref - required hashref ("account" section configuration)
+#*
+sub readAccountSections {
     my ($account_ref) = @_;
-    die "(!)putAccount() account has not 'username'"
-        if !exists $account_ref->{'username'};
-    my $username = $account_ref->{'username'};
+    my $username = isString( $account_ref, 'username' );
     $defaultAccount = $username if !defined $defaultAccount;
-    die "(!)putAccount() duplicate '$username' username"
+    croak "Duplicate '$username' username!"
         if exists $accounts{$username};
     $accounts{$username} = $account_ref;
-    $account_ref->{'url'} = $signalSpamURL
-        if !exists $account_ref->{'url'};
+    $accounts{$username} = {
+        'username' => $username,
+        'password' => isString( $account_ref, 'password' ),
+        'url'      => isString( $account_ref, 'url', $signalSpamURL ),
+        'login-url' =>
+            isString( $account_ref, 'login-url', $signalSpamLoginURL )
+    };
 }
 
-## @method void readMailboxSections($mailbox_ref)
-# @param $mailboxes_ref
-sub readMailboxSections {
-    my ($mailboxes_ref) = @_;
-    if ( ref($mailboxes_ref) eq 'ARRAY' ) {
-        foreach my $mailbox_ref ( @{$mailboxes_ref} ) {
-            putMailbox($mailbox_ref);
-        }
-    }
-    elsif ( ref($mailboxes_ref) eq 'HASH' ) {
-        putMailbox($mailboxes_ref);
-    }
-    else {
-        die "readMailboxSections() bad statement "
-            . "of the 'mailbox' section";
-    }
-}
-
-## @method void putMailbox($mailbox_ref)
-# @param $mailbox_ref
-sub putMailbox {
+#** @function public readMailboxSection($mailbox_ref)
+# @brief Reads an "mailbox" section from configuration file
+# @param mailbox_ref - required hashref ("mailbox" section from configration file)
+#*
+sub readMailboxSection {
     my ($mailbox_ref) = @_;
-    die "(!)putMailbox() mailbox has not 'id'"
-        if !exists $mailbox_ref->{'id'};
-    my $id = $mailbox_ref->{'id'};
-    delete $mailbox_ref->{'id'};
-    die "(!)putMailbox() duplicate mailbox '$id' id"
+    my $id = isString( $mailbox_ref, 'id' );
+    croak sayError( 'Duplicate mailbox "' . $id . ' "id' )
         if exists $mailboxes{$id};
-    $mailboxes{$id} = $mailbox_ref;
-    $mailbox_ref->{'enabled'} = 1
-        if !exists $mailbox_ref->{'enabled'};
-    if ( !exists( $mailbox_ref->{'delay'} ) ) {
-        $mailbox_ref->{'delay'} = 0;
+    $mailboxes{$id} = {
+        'enabled'  => isBool( $mailbox_ref, 'enabled' ),
+        'username' => isString( $mailbox_ref, 'username' ),
+        'password' => isString( $mailbox_ref, 'password' ),
+        'server'   => isString( $mailbox_ref, 'server' ),
+        'port'     => isInteger( $mailbox_ref, 'port' ),
+        'junk'     => isString( $mailbox_ref, 'junk' ),
+        'singal-spam-account' =>
+            isString( $mailbox_ref, 'singal-spam-account' ),
+        'is-reported-spam-deleted' =>
+            isBool( $mailbox_ref, 'is-reported-spam-deleted' ),
+    };
+    if ( $mailboxes{$id}->{'is-reported-spam-deleted'} ) {
+        $mailboxes{$id}->{'target-folder'} = '';
     }
     else {
-        my $delay = $mailbox_ref->{'delay'};
-        $delay = 0 if $ignoreDelay;
-        if ( $delay =~ m{^(\d+)s?$} ) {
-            $mailbox_ref->{'delay'} = $1;
-        }
-        elsif ( $delay =~ m{^(\d+)m$} ) {
-            $mailbox_ref->{'delay'} = $1 * 60;
-        }
-        elsif ( $delay =~ m{^(\d+)h$} ) {
-            $mailbox_ref->{'delay'} = $1 * 3600;
-        }
-        elsif ( $delay =~ m{^(\d+)d$} ) {
-            $mailbox_ref->{'delay'} = $1 * 86400;
-        }
-        else {
-            die "bad delay format: $delay. "
-                . "Format excepted: 60, 60s, 60m, 24h or 15d";
-        }
+        $mailboxes{$id}->{'target-folder'}
+            = isString( $mailbox_ref, 'target-folder' );
     }
+    my $delay = isString( $mailbox_ref, 'delay', '0' );
+    $delay = 0 if $ignoreDelay;
+    if ( $delay =~ m{^(\d+)s?$} ) {
+        $delay = $1;
+    }
+    elsif ( $delay =~ m{^(\d+)m$} ) {
+        $delay = $1 * 60;
+    }
+    elsif ( $delay =~ m{^(\d+)h$} ) {
+        $delay = $1 * 3600;
+    }
+    elsif ( $delay =~ m{^(\d+)d$} ) {
+        $delay = $1 * 86400;
+    }
+    else {
+        croak sayError( "bad delay format: $delay. "
+                . "Format excepted: 60, 60s, 60m, 24h or 15d" );
+    }
+    $mailboxes{$id}->{'delay'} = $delay;
 }
 
-## @method void getOptions()
+#** @function public getOptions()
+# @brief Reads command line options
+#*
 sub getOptions {
     my %opt;
     getopts( 'idvtb:', \%opt ) || HELP_MESSAGE();
@@ -519,23 +755,29 @@ sub getOptions {
     print STDOUT "isTest = $isTest\n" if $isTest;
 }
 
-## @method void writeFile($filename, $string)
+## @function public writeFile( $filename, $string )
+# @bref Writes a string to a file (Used for debugging purposes)
+# @param filename - required string (a filename)
+# @param string - required string (a string)
+#*
 sub writeFile {
     my ( $filename, $string ) = @_;
     my $fh;
     if ( !open( $fh, '>', $filename ) ) {
         sayError("$!");
+        return;
     }
     print $fh $string;
     close $fh;
 }
 
-## @method void HELP_MESSAGE()
-# Display help message
+#** @function public HELP_MESSAGE ()
+# @brief  Display help message
+#*
 sub HELP_MESSAGE {
     print <<ENDTXT;
 Usage: 
- imap2signal-spam.pl [-i -d -v -b boxId -t] 
+ $Script [-i -d -v -b boxId -t] 
   -v verbose mode
   -d debug mode
   -b boxId
@@ -543,5 +785,13 @@ Usage:
   -i ignore delay
 ENDTXT
     exit 0;
+}
+
+sub VERSION_MESSAGE {
+    print STDOUT <<ENDTXT;
+    $Script $VERSION (2020-01-19)
+    Copyright (C) 2008-2020 TLK Games
+    Written by Bruno Ethvignot.
+ENDTXT
 }
 

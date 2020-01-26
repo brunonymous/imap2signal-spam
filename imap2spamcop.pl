@@ -455,7 +455,6 @@ sub init {
             $sysLog_ref->{'facility'}
         );
     }
-
     $mech = WWW::Mechanize->new(
         'agent'      => $agent_ref->{'agent'},
         'cookie_jar' => HTTP::Cookies->new(
