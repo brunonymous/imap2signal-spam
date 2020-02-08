@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2019-11-17
+# @date 2020-02-08
 # https://github.com/brunonymous/imap2signal-spam
 #
 # copyright (c) 2013-2019 TLK Games all rights reserved
@@ -40,7 +40,7 @@ use HTTP::Cookies;
 use Carp;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 use vars qw($VERSION);
-$VERSION = '1.0.2';
+$VERSION = '1.0.3';
 my $agent_ref;
 my $isVerbose          = 0;
 my $isDebug            = 0;
@@ -50,6 +50,7 @@ my $ignoreDelay        = 0;
 my $spamCounter        = 0;
 my $spamIgnoredCounter = 0;
 my $spamTooOldCounter  = 0;
+my $spamHasCeasedCount = 0;
 my $sysLog_ref;
 my %mailboxes = ();
 my %accounts  = ();
@@ -114,6 +115,9 @@ sub run {
     sayInfo("(*) total number of message(s) reported: $spamCounter");
     sayInfo("(*) total number of message(s) ignored: $spamIgnoredCounter");
     sayInfo("(*) total number of message(s) too old: $spamTooOldCounter");
+    sayInfo(
+        "(*) total number of message(s) that have ceased: $spamHasCeasedCount"
+    );
 }
 
 sub messagesProcess {
@@ -288,6 +292,7 @@ sub spamcomProcess {
     }
     my $content = $response->content();
     return '' if isEmailTooOld($content);
+    return '' if hasSpamCeased($content);
 
 WAITREFRESH:
     while (1) {
@@ -312,6 +317,7 @@ WAITREFRESH:
         }
     }
     return '' if isEmailTooOld($content);
+    return '' if hasSpamCeased($content);
 
     $form = $mech->form_number(2);
     if ( !defined $form ) {
@@ -361,6 +367,22 @@ sub isEmailTooOld {
         $error =~ s{\s{2,}}{ }g;
         sayError($error);
         $spamTooOldCounter++;
+        return 1;
+    }
+    return 0;
+}
+
+sub hasSpamCeased {
+    my ($content) = @_;
+    if ($content =~ m{.*<div\ class="error">(ISP\ has\ indicated\ spam
+                    \ will\ cease;\ ISP\ resolved\ this\ issue
+                    \ sometime\ after)[^<]+<noscript>([^<]+) 
+                     }xms
+        )
+    {
+        my $error = "$1 $2";
+        sayError($error);
+        $spamHasCeasedCount++;
         return 1;
     }
     return 0;
@@ -665,10 +687,9 @@ ENDTXT
 
 sub VERSION_MESSAGE {
     print STDOUT <<ENDTXT;
-    $Script $VERSION (2019-11-19)
-    Copyright (C) 2013-2019 TLK Games 
+    $Script $VERSION (2020-02-08)
+    Copyright (C) 2013-2020 TLK Games 
     Written by Bruno Ethvignot.
 ENDTXT
 }
-
 
