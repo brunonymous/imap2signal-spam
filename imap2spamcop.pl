@@ -40,7 +40,7 @@ use HTTP::Cookies;
 use Carp;
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 use vars qw($VERSION);
-$VERSION = '1.0.3';
+$VERSION = '1.0.4';
 my $agent_ref;
 my $isVerbose          = 0;
 my $isDebug            = 0;
@@ -688,7 +688,7 @@ ENDTXT
 
 sub VERSION_MESSAGE {
     print STDOUT <<ENDTXT;
-    $Script $VERSION (2020-02-08)
+    $Script $VERSION (2020-09-12)
     Copyright (C) 2013-2020 TLK Games 
     Written by Bruno Ethvignot.
 ENDTXT

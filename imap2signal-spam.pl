@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2008-03-27
-# @date 2020-01-26
+# @date 2020-09-12
 # https://github.com/brunonymous/imap2signal-spam
 #
 # copyright (c) 2008-2020 TLK Games all rights reserved
@@ -39,7 +39,7 @@ use Sys::Syslog;
 use Time::Local 'timelocal';
 use WWW::Mechanize;
 use vars qw($VERSION);
-$VERSION                            = '1.5.0';
+$VERSION                            = '1.5.1';
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 my %userAgent = ();
@@ -159,7 +159,8 @@ sub messagesProcess {
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die "parse_headers failed: $@\n";
         my $subject = $hashref->{'Subject'}->[0];
-        my $date    = $client->internaldate($msgId)
+        $subject = '' if !defined $subject;
+        my $date = $client->internaldate($msgId)
             or die "Could not internaldate: $@\n";
         sayInfo( sprintf( "%04d", $count ) . "$date / $subject \n" );
 
@@ -201,7 +202,7 @@ sub messagesProcess {
         # but Mail::Intenet modify the original e-mail :-(
         if ( defined $subjectRegex ) {
             my @arrayMail = split( /\n/, $string );
-            my $email     = Mail::Internet->new( \@arrayMail );
+            my $email = Mail::Internet->new( \@arrayMail );
             $subject = $email->get('Subject');
             $subject =~ s{(\n|\r)}{}g;
             $subject =~ s{$subjectRegex}{$1};
@@ -491,7 +492,7 @@ sub readConfig {
 
         # Reads "user-agent" section
         my $ua_ref = isHash( \%config, 'user-agent' );
-        $userAgent{'agent'}   = isString( $ua_ref, 'agent' );
+        $userAgent{'agent'} = isString( $ua_ref, 'agent' );
         $userAgent{'timeout'} = isInteger( $ua_ref, 'timeout' );
 
         # Reads "signal-spams" section
@@ -625,7 +626,7 @@ sub getId {
     ( $pack, $file, $line ) = caller(1);
     my $id = '';
     $function = '?' if !defined $function;
-    $id       = "[$function; line: $line] ";
+    $id = "[$function; line: $line] ";
     return $id;
 }
 
@@ -789,7 +790,7 @@ ENDTXT
 
 sub VERSION_MESSAGE {
     print STDOUT <<ENDTXT;
-    $Script $VERSION (2020-01-19)
+    $Script $VERSION (2020-09-12)
     Copyright (C) 2008-2020 TLK Games
     Written by Bruno Ethvignot.
 ENDTXT
