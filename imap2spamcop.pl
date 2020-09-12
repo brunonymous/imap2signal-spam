@@ -1,10 +1,10 @@
 #!/usr/bin/env perl
 # @author Bruno Ethvignot <bruno at tlk.biz>
 # @created 2013-08-05
-# @date 2020-02-08
+# @date 2020-09-12
 # https://github.com/brunonymous/imap2signal-spam
 #
-# copyright (c) 2013-2019 TLK Games all rights reserved
+# copyright (c) 2013-2020 TLK Games all rights reserved
 #
 # imap2signal-spam is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -142,7 +142,8 @@ MESSAGESLOOP:
         my $hashref = $client->parse_headers( $msgId, 'Subject' )
             or die sayError("parse_headers failed: $@");
         my $subject = $hashref->{'Subject'}->[0];
-        my $date    = $client->internaldate($msgId)
+        $subject = '' if !defined $subject;
+        my $date = $client->internaldate($msgId)
             or die sayError("Could not internaldate: $@");
         sayInfo( sprintf( "%04d", $count ) . ") $date / $subject" );
 
